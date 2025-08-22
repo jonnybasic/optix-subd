@@ -28,12 +28,11 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-include(FetchJsoncpp.cmake)
+include(FetchNlohmannJson.cmake)
 
 set(SCENE_SRC
     animation.cpp    
     animation.h
-    json.cpp
     json.h
     shapeUtils.cpp
     shapeUtils.h
@@ -47,7 +46,7 @@ add_library(scene OBJECT ${SCENE_SRC})
 target_include_directories(scene PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(scene
     glad
-    jsoncpp_static
+    nlohmann_json::nlohmann_json
     OptiXToolkit::ShaderUtil
     OptiXToolkit::Util
     OptiXToolkit::Gui

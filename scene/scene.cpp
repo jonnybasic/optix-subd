@@ -49,8 +49,6 @@
 #include <OptiXToolkit/Util/Exception.h>
 #include <statistics.h>
 
-#include <json/json.h>
-
 #include <charconv>
 #include <chrono>
 #include <cstdint>
@@ -136,7 +134,7 @@ static fs::path resolveMediapath( const fs::path& filepath, const fs::path& medi
 // Args
 //
 
-auto parseJsonEnum = []<typename T>( const Json::Value& node, 
+auto parseJsonEnum = []<typename T>( const json::json& node,
     const std::initializer_list<const char*>& enums, T& result ) constexpr {
 
     assert( size_t( T::COUNT ) == enums.size() );
@@ -144,7 +142,7 @@ auto parseJsonEnum = []<typename T>( const Json::Value& node,
     uint8_t index = 0;
     for( const char* e : enums )
     {
-        if( std::strncmp( node.asString().c_str(), e, std::strlen( e ) ) == 0 )
+        if( std::strncmp( node.get<std::string>().c_str(), e, std::strlen( e ) ) == 0 )
         {
             result = T(index);
             break;
@@ -154,7 +152,7 @@ auto parseJsonEnum = []<typename T>( const Json::Value& node,
 };
 
 
-static SceneArgs& operator<<( SceneArgs& args, const Json::Value& node )
+static SceneArgs& operator<<( SceneArgs& args, const json::json& node )
 {
 
     // Intentionally empty.  Can add parsing for SceneArgs values here if you want the
@@ -167,14 +165,10 @@ static SceneArgs& operator<<( SceneArgs& args, const Json::Value& node )
 // Scene Attributes
 //
 
-static Scene::Attributes& operator << (Scene::Attributes& attrs, const Json::Value& node)
+static Scene::Attributes& operator<<( Scene::Attributes& attrs, const json::json& node )
 {
-    if( const auto& value = node["frame range"]; value.isArray() )
-        value >> attrs.frameRange;
-
-    if( const auto& value = node["frame rate"]; value.isDouble() )
-        value >> attrs.frameRate;
-
+    attrs.frameRange = node.value( "frame range", attrs.frameRange );
+    attrs.frameRate  = node.value( "frame rate", attrs.frameRate );
     return attrs;
 }
 
@@ -182,18 +176,14 @@ static Scene::Attributes& operator << (Scene::Attributes& attrs, const Json::Val
 // View
 //
 
-static View& operator << ( View& view, const Json::Value& node )
+static View& operator<<( View& view, const json::json& node )
 {
-    if( const auto& value = node["position"]; !value.isNull() )
-        value >> view.position;
-    if( const auto& value = node["lookat"]; !value.isNull() )
-        value >> view.lookat;
-    if( const auto& value = node["up"]; !value.isNull() )
-        value >> view.up;
-    if (const auto& value = node["rotation"]; !value.isNull())
-        value >> *view.rotation;
-    if( const auto& value = node["fov"]; !value.isNull() )
-        value >> view.fov;
+    view.position = node.value( "position", view.position );
+    view.lookat   = node.value( "lookat", view.lookat );
+    view.up       = node.value( "up", view.up );
+    if( view.rotation )
+        *view.rotation = node.value( "rotation", *view.rotation );
+    view.fov = node.value( "fov", view.fov );
     return view;
 }
 
@@ -201,32 +191,30 @@ static View& operator << ( View& view, const Json::Value& node )
 // Instance
 //
 
-static Instance& operator << ( Instance& instance, const Json::Value& node )
+static Instance& operator<<( Instance& instance, const json::json& node )
 {
-    if( const auto& value = node["translation"]; !value.isNull() )
-        value >> instance.translation;
+    instance.translation = node.value( "translation", instance.translation );
 
-    if( const auto& value = node["rotation"]; !value.isNull() )
+    if( node.contains( "rotation" ) )
     {
-        if( node.isArray() && node.size() == 4 )
-            throw std::runtime_error("expecting 4-component quaternion for node's 'rotation' (use 'euler' otherwise)");
-        value >> instance.rotation;
+        if( node["rotation"].is_array() && node["rotation"].size() != 4 )
+            throw std::runtime_error( "expecting 4-component quaternion for node's 'rotation' (use 'euler' otherwise)" );
+        instance.rotation = node.value( "rotation", instance.rotation );
     }
-    else if( const auto& value = node["euler"]; !value.isNull() )
+    else if( node.contains( "euler" ) )
     {
-        float3 euler = { 0.0, 0.0, 0.0 };
-        value >> euler;
+        float3 euler      = node.value( "euler", float3{0, 0, 0} );
         euler *= float( M_PI ) / 180.f;
         instance.rotation = otk::rotationEuler<float>( euler );
     }
 
-    if( const auto& value = node["scaling"]; !value.isNull() )
-        value >> instance.scaling;
+    instance.scaling = node.value( "scaling", instance.scaling );
 
     instance.updateLocalTransform();
 
     return instance;
 }
+
 
 void Instance::updateLocalTransform()
 {
@@ -242,12 +230,12 @@ void Instance::updateLocalTransform()
 // Track & Channel
 //
 
-inline anim::Basis parseChannelModeEnum( const Json::Value& node )
+inline anim::Basis parseChannelModeEnum( const json::json& node )
 {
     if( node.empty() )
         throw std::runtime_error( "track interpolation mode expects a string value" );
 
-    std::string mode = node.asString();
+    std::string mode = node.get<std::string>();
 
     using enum anim::Basis;
          if( mode == "step" ) return Step;
@@ -442,11 +430,11 @@ class Scene::AnimationLoader {
 
     Scene& m_scene;
 
-    uint32_t readFloatArray( const Json::Value& node, float* dest, uint32_t size ) {
-        if( node.isArray() && ( node.size() == size ) )
+    uint32_t readFloatArray( const json::json& node, float* dest, uint32_t size ) {
+        if( node.is_array() && ( node.size() == size ) )
         {
             for( uint8_t i = 0; i < size; ++i )
-                dest[i] = node[i].asFloat();
+                dest[i] = node[i].get<float>();
             return size;
         }
         return 0;
@@ -508,29 +496,26 @@ class Scene::AnimationLoader {
         return nullptr;
     }
 
-    anim::ChannelInterface::KeyframeDesc loadKeyframe( const Json::Value& keyframeNode, uint8_t valueSize, bool readTangents )
+    anim::ChannelInterface::KeyframeDesc loadKeyframe( const json::json& keyframeNode, uint8_t valueSize, bool readTangents )
     {
         anim::ChannelInterface::KeyframeDesc keyframeDesc;
 
         assert( valueSize <= (uint8_t)std::size( keyframeDesc.value ) );
 
-        if( Json::Value const& timeNode = keyframeNode["time"]; timeNode.isNumeric() )
-            keyframeDesc.time = timeNode.asFloat();
-        else
-            throw std::runtime_error("invalid keyframe time token : expected a numeric value");
+        keyframeDesc.time = keyframeNode.value( "time", 0.f );
 
-        Json::Value const& valueNode = keyframeNode["value"]; 
-
-        if( valueNode.isArray() && ( valueNode.size() == valueSize ) )
+        if( auto it = keyframeNode.find( "value" ); it != keyframeNode.end() && it->is_array() && ( it->size() == valueSize ) )
         {
-            keyframeDesc.valueSize = uint8_t( readFloatArray( valueNode, keyframeDesc.value, valueSize ) );
+            keyframeDesc.valueSize = uint8_t( readFloatArray( *it, keyframeDesc.value, valueSize ) );
 
             if( readTangents )
             {
-                if( Json::Value const& inTangentNode = keyframeNode["in-tangent"]; inTangentNode.isArray() )
-                    readFloatArray( inTangentNode, keyframeDesc.inTangent, valueSize );
-                if( Json::Value const& outTangentNode = keyframeNode["out-tangent"]; outTangentNode.isArray() )
-                    readFloatArray( outTangentNode, keyframeDesc.outTangent, valueSize );
+                if( auto inTangentIt = keyframeNode.find( "in-tangent" );
+                    inTangentIt != keyframeNode.end() && inTangentIt->is_array() )
+                    readFloatArray( *inTangentIt, keyframeDesc.inTangent, valueSize );
+                if( auto outTangentIt = keyframeNode.find( "out-tangent" );
+                    outTangentIt != keyframeNode.end() && outTangentIt->is_array() )
+                    readFloatArray( *outTangentIt, keyframeDesc.outTangent, valueSize );
             }
         }
         else
@@ -538,34 +523,33 @@ class Scene::AnimationLoader {
         return keyframeDesc;
     }
 
-    std::unique_ptr<anim::ChannelInterface> loadChannel( const Json::Value& channelNode )
+    std::unique_ptr<anim::ChannelInterface> loadChannel( const json::json& channelNode )
     {
         std::unique_ptr<anim::ChannelInterface> channel;
 
-        if( const Json::Value& targetNode = channelNode["target"]; targetNode.isString() && !targetNode.empty() )
-            channel = resolveChannelTarget( targetNode.asString() );
-        
+        if( auto it = channelNode.find( "target" ); it != channelNode.end() && it->is_string() && !it->empty() )
+            channel = resolveChannelTarget( it->get<std::string>() );
+
         if( !channel )
             return nullptr;
 
-        if( const Json::Value& modeNode = channelNode["mode"]; modeNode.isString() )
-            channel->setInterpolation( parseChannelModeEnum( modeNode ) );
+        if( auto it = channelNode.find( "mode" ); it != channelNode.end() && it->is_string() )
+            channel->setInterpolation( parseChannelModeEnum( *it ) );
         else
             throw std::runtime_error( "channel interpolation mode expects a string typed value" );
 
-        const Json::Value& dataNode = channelNode["data"];
-        if( dataNode.isArray() && !dataNode.empty() )
+        if( auto it = channelNode.find( "data" ); it != channelNode.end() && it->is_array() && !it->empty() )
         {
-            channel->resize( dataNode.size() );
+            channel->resize( it->size() );
 
             bool requiresTangents = anim::requiresTangents( channel->interpolation() );
 
             uint8_t valueSize = anim::dim( channel->valueType() );
 
-            for( uint32_t keyframeIndex = 0; keyframeIndex < dataNode.size(); ++keyframeIndex )
+            for( uint32_t keyframeIndex = 0; keyframeIndex < it->size(); ++keyframeIndex )
             {
-                auto keyframeDesc = loadKeyframe( dataNode[keyframeIndex], valueSize, requiresTangents );
-                
+                auto keyframeDesc = loadKeyframe( (*it)[keyframeIndex], valueSize, requiresTangents );
+
                 if( !channel->setKeyframe( keyframeIndex, keyframeDesc ) )
                     throw std::runtime_error( "incorrect array size for keyframe value" );
             }
@@ -574,72 +558,68 @@ class Scene::AnimationLoader {
         }
         return channel;
     }
-    std::unique_ptr<Sequence> loadSequence( const Json::Value& sequenceNode )
+    std::unique_ptr<Sequence> loadSequence( const json::json& sequenceNode )
     {
         auto sequence = std::make_unique<Sequence>();
 
-        if( const Json::Value& node = sequenceNode["name"]; node.isString() && !node.empty() )
-            sequence->name = node.asString();
+        sequence->name = sequenceNode.value( "name", "" );
 
-        if( const Json::Value& channelsNode = sequenceNode["channels"]; channelsNode.isArray() && !channelsNode.empty() )
+        if( auto it = sequenceNode.find( "channels" ); it != sequenceNode.end() && it->is_array() && !it->empty() )
         {
+            const auto& channelsNode = *it;
             sequence->channels.reserve( channelsNode.size() );
 
-            for( uint32_t i = 0; i < channelsNode.size(); ++i )
+            for( const auto& channelNode : channelsNode )
             {
-                const Json::Value& channelNode = channelsNode[i];
-
-                if( const Json::Value& targetNode = channelNode["target"]; targetNode.isString() && !targetNode.empty() )
+                if( auto channelIt = channelNode.find( "target" );
+                    channelIt != channelNode.end() && channelIt->is_string() && !channelIt->empty() )
                 {
                     if( auto channel = loadChannel( channelNode ); channel && !channel->empty() )
                     {
                         // automatic detection of sequence start/end
                         sequence->start = std::min( sequence->start, *channel->start() );
-                        sequence->end = std::max( sequence->end, *channel->end() );
+                        sequence->end   = std::max( sequence->end, *channel->end() );
                         sequence->channels.emplace_back( std::move( channel ) );
                     }
                 }
             }
-
         }
 
         // override sequence start/end if the user specified either
-        if( const Json::Value& node = sequenceNode["start"]; node.isNumeric() )
-            sequence->start = node.asFloat();
-        if( const Json::Value& node = sequenceNode["end"]; node.isNumeric() )
-            sequence->end = node.asFloat();
+        sequence->start = sequenceNode.value( "start", sequence->start );
+        sequence->end   = sequenceNode.value( "end", sequence->end );
 
-        if (sequence->end < sequence->start)
+        if( sequence->end < sequence->start )
             std::swap( sequence->start, sequence->end );
 
         return sequence;
     }
 
-    std::unique_ptr<Animation> loadAnimation( const Json::Value& animationNode )
+    std::unique_ptr<Animation> loadAnimation( const json::json& animationNode )
     {
         auto animation = std::make_unique<Animation>();
 
-        if (const Json::Value& nameNode = animationNode["name"]; nameNode.isString() && !nameNode.empty())
-            animation->name = nameNode.asString();
+        animation->name = animationNode.value( "name", "" );
 
-        if( const Json::Value& sequencesNode = animationNode["sequences"]; sequencesNode.isArray() && !sequencesNode.empty() )
+        if( auto it = animationNode.find( "sequences" ); it != animationNode.end() && it->is_array() && !it->empty() )
         {
-            animation->sequences.resize(sequencesNode.size());
+            const auto& sequencesNode = *it;
+            animation->sequences.resize( sequencesNode.size() );
 
-            for( uint32_t i = 0 ; i < sequencesNode.size(); ++i )
+            for( uint32_t i = 0; i < sequencesNode.size(); ++i )
             {
                 if( auto sequence = loadSequence( sequencesNode[i] ) )
                 {
-                    animation->start = std::min( animation->start , sequence->start );
-                    animation->end = std::min( animation->end , sequence->end );
-                    animation->sequences[i] = std::move(sequence);
+                    animation->start       = std::min( animation->start, sequence->start );
+                    animation->end         = std::min( animation->end, sequence->end );
+                    animation->sequences[i] = std::move( sequence );
                 }
             }
         }
 
         // force sequences to be in chronological order
-        std::sort(animation->sequences.begin(), animation->sequences.end(),
-            []( const std::unique_ptr<Sequence>& a, const std::unique_ptr<Sequence>& b ) { return a->start < b->start; });
+        std::sort( animation->sequences.begin(), animation->sequences.end(),
+                   []( const std::unique_ptr<Sequence>& a, const std::unique_ptr<Sequence>& b ) { return a->start < b->start; } );
 
         assert( animation->end >= animation->start );
         return animation;
@@ -649,20 +629,17 @@ public:
 
     AnimationLoader( Scene& s ) : m_scene(s) {}
 
-    bool loadAnimations( const Json::Value& rootNode )
+    bool loadAnimations( const json::json& rootNode )
     {
-        if( const Json::Value& animationsNode = rootNode["animations"]; !animationsNode.isNull() )
+        if( auto it = rootNode.find( "animations" ); it != rootNode.end() && it->is_array() && !it->empty() )
         {
-            if( !animationsNode.isArray() || animationsNode.empty() )
-                return false;
-
+            const auto& animationsNode = *it;
             m_scene.m_animations.clear();
-
             m_scene.m_animations.resize( animationsNode.size() );
 
             for( uint32_t i = 0; i < animationsNode.size(); ++i )
-                m_scene.m_animations[i] = loadAnimation( animationsNode[i] );        
-            
+                m_scene.m_animations[i] = loadAnimation( animationsNode[i] );
+
             return true;
         }
         return false;
@@ -778,7 +755,7 @@ bool Scene::reloadAnimations()
 {
     if( fs::is_regular_file( m_filepath ) )
     {
-        if( auto json_root = readFile( m_filepath ); json_root.isObject() )
+        if( auto json_root = readFile( m_filepath ); json_root.is_object() )
             return AnimationLoader( *this ).loadAnimations( json_root );
     }
     return false;
@@ -808,81 +785,74 @@ void Scene::loadSceneFile( const fs::path& filepath, Scene::ModelLoader& modeLoa
 {
     fs::path fp = filepath;
 
-    if( !fs::is_regular_file( fp ) && fs::is_regular_file( modeLoader.mediapath / fp )  )
+    if( !fs::is_regular_file( fp ) && fs::is_regular_file( modeLoader.mediapath / fp ) )
         fp = modeLoader.mediapath / fp;
 
-    if( auto json_root = readFile( fp ); json_root.isObject() )
+    if( auto json_root = readFile( fp ); json_root.is_object() )
     {
         modeLoader.modelpath = fp.parent_path();
 
-        const Json::Value& models = json_root["models"];
-        const Json::Value& graph = json_root["graph"];
+        const auto& models = json_root.value("models", json::json::array());
+        const auto& graph = json_root.value("graph", json::json::array());
 
-        if( !models.isArray() || !graph.isArray() )
-            throw std::runtime_error("need valid 'models' and 'graph' arrays in '" + fp.generic_string() + "'");
+        if( !models.is_array() || !graph.is_array() )
+            throw std::runtime_error( "need valid 'models' and 'graph' arrays in '" + fp.generic_string() + "'" );
 
-        uint32_t nmodels = models.size();
+        uint32_t nmodels = static_cast<uint32_t>( models.size() );
 
-        for( uint32_t i = 0 ; i < graph.size() ; ++i )
+        for( uint32_t i = 0; i < graph.size(); ++i )
         {
-            const Json::Value& node = graph[i];
+            const json::json& node = graph[i];
 
             Instance instance;
 
             instance << node;
 
             std::string nodeName = "<unnamed instance>";
-            if( const auto& name = node["name"]; name.isString() )
-                instance.name = m_instanceNames.emplace( name.asString() ).first->c_str();
+            if( auto it = node.find( "name" ); it != node.end() && it->is_string() )
+                instance.name = m_instanceNames.emplace( it->get<std::string>() ).first->c_str();
 
-            if( const auto& modelNode = node["model"]; !modelNode.isNull() )
+            if( auto it = node.find( "model" ); it != node.end() && it->is_number_integer() )
             {
-                if( !modelNode.isIntegral() )
-                    throw std::runtime_error( "'model' value for graph node '" + nodeName + "' must be an index" );
-
-                int modelIndex = modelNode.asInt();
+                int modelIndex = it->get<int>();
                 if( modelIndex < 0 || modelIndex >= nmodels )
                     throw std::runtime_error( "out of bounds 'model' index for graph node '" + nodeName + "'" );
 
-                const Json::Value& modelName = models[modelIndex];
+                const json::json& modelName = models[modelIndex];
 
-                if( !modelName.isString() )
+                if( !modelName.is_string() )
                     throw std::runtime_error( "invalid model path in 'models' section" );
 
-                float frameOffset = 0.0f;
-                if( const auto& offset = node["frameoffset"]; offset.isDouble() )
-                {
-                    frameOffset = offset.asFloat();
-                }
+                float frameOffset = node.value( "frameoffset", 0.0f );
 
-                Model model = modeLoader.loadModel( modelName.asString(), instance, { 0, 0 }, frameOffset );
+                Model model = modeLoader.loadModel( modelName.get<std::string>(), instance, {0, 0}, frameOffset );
 
                 insertModel( std::move( model ) );
             }
-            
-            if( const auto& type = node["type"]; type.isString() )
+
+            if( node.contains( "type" ) )
                 throw std::runtime_error( "'type' token for graph node '" + nodeName + "' not supported" );
 
-            if( const auto& parent = node["parent"]; !parent.isNull() )
+            if( node.contains( "parent" ) )
                 throw std::runtime_error( "'parent' token for graph node '" + nodeName + "' not supported" );
 
-            if( const auto& children = node["children"]; !children.isNull() )
+            if( node.contains( "children" ) )
                 throw std::runtime_error( "'children' token for graph node '" + nodeName + "' not supported" );
         }
 
-        if( const Json::Value& view = json_root["view"]; view.isObject() )
+        if( auto it = json_root.find( "view" ); it != json_root.end() && it->is_object() )
         {
             if( !m_defaultView )
                 m_defaultView = std::make_unique<View>();
-            *m_defaultView << view;
+            *m_defaultView << *it;
         }
-        
-        AnimationLoader( *this  ).loadAnimations( json_root );
 
-        if( Json::Value& settings = json_root["settings"]; settings.isObject() )
+        AnimationLoader( *this ).loadAnimations( json_root );
+
+        if( auto it = json_root.find( "settings" ); it != json_root.end() && it->is_object() )
         {
-            modeLoader.args << settings;
-            m_attributes << settings;
+            modeLoader.args << *it;
+            m_attributes << *it;
         }
 
         m_filepath = fp;

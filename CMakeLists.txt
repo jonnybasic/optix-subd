@@ -259,24 +259,25 @@ target_include_directories( optixSubd PRIVATE
 )
 
 target_link_libraries( optixSubd
-  EmbeddedDeviceCode
-  OptiXToolkit::Gui
-  OptiXToolkit::Util
-  OptiXToolkit::ShaderUtil
-  glfw
-  glad
-  imgui
-  implot
-  jsoncpp_static
-  subdivision
-  ${CUDA_LIBS}
-  ${CMAKE_DL_LIBS}  
+  PRIVATE
+    EmbeddedDeviceCode
+    OptiXToolkit::Gui
+    OptiXToolkit::Util
+    OptiXToolkit::ShaderUtil
+    glfw
+    glad
+    imgui
+    implot
+    nlohmann_json::nlohmann_json
+    subdivision
+    ${CUDA_LIBS}
+    ${CMAKE_DL_LIBS}  
 )
 
 
 # Optionally link tbb for parallel C++17 algorithms on gcc
 if ( TBB_FOUND )
-    target_link_libraries( optixSubd TBB::tbb )
+    target_link_libraries( optixSubd PRIVATE TBB::tbb )
 endif()
 
 
@@ -316,7 +317,7 @@ set_target_properties(glfw                PROPERTIES FOLDER "external/GLFW3")
 set_target_properties(glad                PROPERTIES FOLDER "external/glad")
 set_target_properties(imgui               PROPERTIES FOLDER "external/imgui")
 set_target_properties(implot              PROPERTIES FOLDER "external/implot")
-set_target_properties(jsoncpp_static      PROPERTIES FOLDER "external/jsoncpp")
+set_target_properties(nlohmann_json       PROPERTIES FOLDER "external/json")
 set_target_properties(Gui                 PROPERTIES FOLDER "otk")
 set_target_properties(ShaderUtil          PROPERTIES FOLDER "otk")
 set_target_properties(Util                PROPERTIES FOLDER "otk")

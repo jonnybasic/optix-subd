@@ -32,7 +32,7 @@
 
 #include <OptiXToolkit/ShaderUtil/Quaternion.h>
 
-#include <json/json.h>
+
 
 #include <algorithm>
 #include <cassert>

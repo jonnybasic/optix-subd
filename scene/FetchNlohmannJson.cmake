@@ -28,38 +28,16 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-if(TARGET jsoncpp OR TARGET jsoncpp_static)
+if(TARGET nlohmann_json)
     return()
 endif()
 
 
 include(FetchContent)
-FetchContent_Declare(
-    jsoncpp
-    GIT_REPOSITORY https://github.com/open-source-parsers/jsoncpp
-    GIT_TAG 69098a18b9af0c47549d9a271c054d13ca92b006
-    )
-#FetchContent_MakeAvailable(jsoncpp)
-FetchContent_Populate(jsoncpp)
 
-set(JSONCPP_WITH_TESTS OFF CACHE BOOL "")
-set(JSONCPP_WITH_POST_BUILD_UNITTEST  OFF CACHE BOOL "")
-set(JSONCPP_WITH_STRICT_ISO OFF CACHE BOOL "")
-set(JSONCPP_WITH_PKGCONFIG_SUPPORT OFF CACHE BOOL "")
-set(JSONCPP_WITH_CMAKE_PACKAGE  OFF CACHE BOOL "")
-set(JSONCPP_WITH_EXAMPLE OFF CACHE BOOL "")
-set(JSONCPP_STATIC_WINDOWS_RUNTIME OFF CACHE BOOL "")
+FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz)
+FetchContent_MakeAvailable(json)
 
-set(__tmp_shared_libs ${BUILD_SHARED_LIBS})
-set(__tmp_static_libs ${BUILD_STATIC_LIBS})
-set(__tmp_object_libs ${BUILD_OBJECT_LIBS})
+# TODO json: set cmake config vars here similar to FetchJsoncpp.cmake ?
 
-set(BUILD_SHARED_LIBS OFF)
-set(BUILD_STATIC_LIBS ON)
-set(BUILD_OBJECT_LIBS OFF)
-
-add_subdirectory(${jsoncpp_SOURCE_DIR} ${jsoncpp_BINARY_DIR} EXCLUDE_FROM_ALL)
-
-set(BUILD_SHARED_LIBS ${__tmp_shared_libs})
-set(BUILD_STATIC_LIBS ${__tmp_static_libs})
-set(BUILD_OBJECT_LIBS ${__tmp_object_libs})
+#target_link_libraries(foo PRIVATE nlohmann_json::nlohmann_json)

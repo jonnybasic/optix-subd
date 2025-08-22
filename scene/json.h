@@ -32,50 +32,153 @@
 
 // clang-format off
 #include <OptiXToolkit/ShaderUtil/vec_math.h>
+#include <OptiXToolkit/ShaderUtil/Quaternion.h>
 
 #include <cassert>
 #include <filesystem>
 #include <string>
+#include <fstream>
 
-namespace Json
+#include <nlohmann/json.hpp>
+
+namespace nlohmann
 {
-    class Value;
+    // These helper functions let us call node.value() and get back CUDA vector types
+    template <>
+    struct adl_serializer<float3>
+    {
+        static void to_json( nlohmann::json& j, const float3& val )
+        {
+            j = {val.x, val.y, val.z};
+        }
+
+        static void from_json( const nlohmann::json& j, float3& val )
+        {
+            if( j.is_array() && j.size() == 3 )
+            {
+                j.at( 0 ).get_to( val.x );
+                j.at( 1 ).get_to( val.y );
+                j.at( 2 ).get_to( val.z );
+            }
+            else if( j.is_number() )
+            {
+                const float v = j.get<float>();
+                val = make_float3( v );
+            }
+        }
+    };
+
+    template <>
+    struct adl_serializer<float2>
+    {
+        static void to_json( nlohmann::json& j, const float2& val )
+        {
+            j = {val.x, val.y};
+        }
+
+        static void from_json( const nlohmann::json& j, float2& val )
+        {
+            if( j.is_array() && j.size() == 2 )
+            {
+                j.at( 0 ).get_to( val.x );
+                j.at( 1 ).get_to( val.y );
+            }
+            else if( j.is_number() )
+            {
+                const float v = j.get<float>();
+                val = make_float2( v );
+            }
+        }
+    };
+
+    template <>
+    struct adl_serializer<float4>
+    {
+        static void to_json( nlohmann::json& j, const float4& val )
+        {
+            j = {val.x, val.y, val.z, val.w};
+        }
+
+        static void from_json( const nlohmann::json& j, float4& val )
+        {
+            if( j.is_array() && j.size() == 4 )
+            {
+                j.at( 0 ).get_to( val.x );
+                j.at( 1 ).get_to( val.y );
+                j.at( 2 ).get_to( val.z );
+                j.at( 3 ).get_to( val.w );
+            }
+            else if( j.is_number() )
+            {
+                const float v = j.get<float>();
+                val = make_float4( v );
+            }
+        }
+    };
+
+    template <>
+    struct adl_serializer<int2>
+    {
+        static void from_json( const nlohmann::json& j, int2& val )
+        {
+            if( j.is_array() && j.size() == 2 )
+            {
+                j.at( 0 ).get_to( val.x );
+                j.at( 1 ).get_to( val.y );
+            }
+        }
+    };
+
+    template <>
+    struct adl_serializer<uint2>
+    {
+        static void from_json( const nlohmann::json& j, uint2& val )
+        {
+            if( j.is_array() && j.size() == 2 )
+            {
+                j.at( 0 ).get_to( val.x );
+                j.at( 1 ).get_to( val.y );
+            }
+        }
+    };
+
+    template <>
+    struct adl_serializer<otk::quat>
+    {
+        static void to_json( nlohmann::json& j, const otk::quat& val )
+        {
+            j = {val.w, val.x, val.y, val.z};
+        }
+
+        static void from_json( const nlohmann::json& j, otk::quat& val )
+        {
+            if( j.is_array() && j.size() == 4 )
+            {
+                j.at( 0 ).get_to( val.w );
+                j.at( 1 ).get_to( val.x );
+                j.at( 2 ).get_to( val.y );
+                j.at( 3 ).get_to( val.z );
+            }
+        }
+    };
+}  // namespace nlohmann
+
+namespace json = nlohmann;
+
+
+inline json::json readFile( const std::filesystem::path& filepath )
+{
+    namespace fs = std::filesystem;
+    std::string   fp  = filepath.generic_string();
+    std::ifstream ifs( fp );
+    if( !ifs )
+        throw std::runtime_error( std::string( "Cannot find: " ) + fp );
+
+    json::json root = json::json::parse( ifs, nullptr, true, true );
+    if( root.is_null() )
+        throw std::runtime_error( "error reading '" + fp + "'" );
+
+    return root;
 }
 
-Json::Value readFile( const std::filesystem::path& filepath );
-
-template <typename T> T read( const Json::Value& node, const T& defaultValue ) { assert( false ); return T{}; }
-
-template <> std::string read<std::string>( const Json::Value& node, const std::string& defaultValue );
-
-template <> bool read<bool>(const Json::Value& node, const bool& defaultValue);
-
-template <> int8_t read<int8_t>(const Json::Value& node, const int8_t& defaultValue);
-template <> int16_t read<int16_t>(const Json::Value& node, const int16_t& defaultValue);
-template <> int32_t read<int32_t>( const Json::Value& node, const int32_t& defaultValue );
-template <> int2 read<int2>( const Json::Value& node, const int2& defaultValue );
-template <> int3 read<int3>( const Json::Value& node, const int3& defaultValue );
-template <> int4 read<int4>( const Json::Value& node, const int4& defaultValue );
-
-template <> uint8_t read<uint8_t>( const Json::Value& node, const uint8_t& defaultValue );
-template <> uint16_t read<uint16_t>( const Json::Value& node, const uint16_t& defaultValue );
-template <> uint32_t read<uint32_t>( const Json::Value& node, const uint32_t& defaultValue );
-template <> uint2 read<uint2>( const Json::Value& node, const uint2& defaultValue );
-template <> uint3 read<uint3>( const Json::Value& node, const uint3& defaultValue );
-template <> uint4 read<uint4>( const Json::Value& node, const uint4& defaultValue );
-
-template <> float read<float>( const Json::Value& node, const float& defaultValue );
-template <> float2 read<float2>( const Json::Value& node, const float2& defaultValue );
-template <> float3 read<float3>( const Json::Value& node, const float3& defaultValue );
-template <> float4 read<float4>( const Json::Value& node, const float4& defaultValue );
-
-template <> double read<double>( const Json::Value& node, const double& defaultValue );
-template <> double2 read<double2>( const Json::Value& node, const double2& defaultValue );
-template <> double3 read<double3>( const Json::Value& node, const double3& defaultValue );
-template <> double4 read<double4>( const Json::Value& node, const double4& defaultValue );
-
-template<typename T> void operator >> ( const Json::Value& node, T& dest )
-{
-    dest = read<T>(node, dest);
-}
 // clang-format on
