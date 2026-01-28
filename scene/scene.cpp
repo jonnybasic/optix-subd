@@ -882,8 +882,26 @@ uint32_t Scene::totalSubdPatchCount() const
     return sum;
 }
 
-void Scene::animate( const FrameTime& frameTime )
+bool Scene::animate( const FrameTime& frameTime, bool& isDiscontinuous )
 {
+    isDiscontinuous = false;
+    if( frameTime.currentTime == m_lastAnimationTime )
+    {
+        clearMotionCache();
+        return false;
+    }
+
+    if( m_lastAnimationTime >= 0.0f )
+    {
+        const float timeDelta = frameTime.currentTime - m_lastAnimationTime;
+        // Discontinuity is a jump of more than 10 frames.
+        if( frameTime.frameRate > 0 && fabsf( timeDelta ) > 10.0f / frameTime.frameRate )
+        {
+            isDiscontinuous = true;
+        }
+    }
+    m_lastAnimationTime = frameTime.currentTime;
+
     // pose all animated meshes
     for( auto& subdMesh : m_subdMeshes )
         subdMesh->animate( frameTime.currentTime, frameTime.frameRate );
@@ -893,8 +911,9 @@ void Scene::animate( const FrameTime& frameTime )
     {
         // XXXX hard-wire animation for now - we can extend in the future if
         // we need to select between multiple animations
-        m_animations.front()->animate( frameTime );    
+        m_animations.front()->animate( frameTime );
     }
+    return true;
 }
 
 void Scene::clearMotionCache()

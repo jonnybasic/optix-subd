@@ -80,12 +80,18 @@ struct HitResult
     float2   texcoord     = { 0 };
 };
 
+struct EnvLight {
+    float3 baseColor    = { 0.25f, 0.25f, 0.25f };
+    float3 sunColor     = { 0.3f, 0.3f, 0.27f };
+    float3 sunDir       = { 0.0f, 0.70710678f, 0.70710678f }; // Matches default angles in OptixRenderer
+    float  sunSharpness = 64.0f;
+};
+
 struct Params
 {
     unsigned int              frame_index = 0;
     unsigned int              subframe_index = 0;
     HitResult*                hit_buffer = nullptr;
-    uchar4*                   frame_buffer = nullptr;
     const ClusterShadingData* cluster_shading_data = nullptr;
     ClusterPattern            cluster_pattern {};
     const float3*             clusterVertexPositions = nullptr;
@@ -95,7 +101,9 @@ struct Params
     RwFloat4 aovNormals;
     RwFloat4 aovColor;
     RwFloat aovDepth;
-    RwFloatInterop aovDepthHires;
+    RwFloat4 aovSpecular;
+    RwFloat aovRoughness;
+    RwFloat aovSpecularHitT;
 
     float3 eye {};
     float3 U {};
@@ -103,9 +111,12 @@ struct Params
     float3 W {};
     float2 jitter {};
 
-    int  aoSamples = 9;
+    // Global material overrides, should match default values in OptixRenderer
+    float  globalDiffuse   = 1.0f;
+    float  globalSpecular  = 0.03f;
+    float  globalRoughness = 0.15f;
 
-    float3 missColor = { 0.1f, 0.1f, 0.1f };
+    EnvLight envLight;
 
     OptixTraversableHandle handle = 0;
 

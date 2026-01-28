@@ -33,6 +33,7 @@
 
 #include "material/materialCuda.h"
 #include "shadingTypes.h"
+#include "pipelineCommonOptions.h"
 
 #include <OptiXToolkit/Util/Exception.h>
 #include <embeddedDeviceCode.h>
@@ -40,7 +41,7 @@
 
 #include <vector>
 
-static void createModuleAndPipelineOptions(Pipeline& pipeline, Params& params, bool enableInstancing)
+static void createModuleAndPipelineOptions(Pipeline& pipeline, Params& params)
 {
     OptixModuleCompileOptions module_compile_options = {};
 
@@ -53,12 +54,12 @@ static void createModuleAndPipelineOptions(Pipeline& pipeline, Params& params, b
     module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_MINIMAL;
 #endif
     // clang-format on
-    pipeline.pipeline_compile_options.usesMotionBlur = false;
-    pipeline.pipeline_compile_options.traversableGraphFlags =
-        enableInstancing ? OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING : OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
-    pipeline.pipeline_compile_options.numPayloadValues = 4;
+    OTK_REQUIRE( pipeline.commonOptions );
+    pipeline.pipeline_compile_options.usesMotionBlur = pipeline.commonOptions->usesMotionBlur;
+    pipeline.pipeline_compile_options.traversableGraphFlags = pipeline.commonOptions->traversableGraph;
+    pipeline.pipeline_compile_options.numPayloadValues = 13;
     pipeline.pipeline_compile_options.numAttributeValues = 2;
-    pipeline.pipeline_compile_options.allowClusteredGeometry = true;
+    pipeline.pipeline_compile_options.allowClusteredGeometry = pipeline.commonOptions->allowClusteredGeometry;
 
 #if !defined( NDEBUG )
     pipeline.pipeline_compile_options.exceptionFlags =
@@ -86,7 +87,7 @@ static void createModuleAndPipelineOptions(Pipeline& pipeline, Params& params, b
         embeddedDeviceCodeCHText(), embeddedDeviceCodeCHSize, LOG, &LOG_SIZE, &pipeline.moduleCH));
 }
 
-static void createPipeline(Pipeline& pipeline, Params& params, bool enableInstancing)
+static void createPipeline(Pipeline& pipeline, Params& params)
 {
     OptixPipelineLinkOptions pipeline_link_options = {};
     pipeline_link_options.maxTraceDepth = 2;  // primary + occlusion
@@ -113,7 +114,8 @@ static void createPipeline(Pipeline& pipeline, Params& params, bool enableInstan
     OPTIX_CHECK(optixUtilComputeStackSizes(&stack_sizes, max_trace_depth, max_cc_depth, max_dc_depth, &direct_callable_stack_size_from_traversal,
         &direct_callable_stack_size_from_state, &continuation_stack_size));
 
-    uint32_t max_traversal_depth = enableInstancing ? 2 : 1;
+    OTK_REQUIRE( pipeline.commonOptions );
+    uint32_t max_traversal_depth = static_cast<uint32_t>( pipeline.commonOptions->maxTraversalDepth() );
 
     OPTIX_CHECK(optixPipelineSetStackSize(pipeline.pipeline, direct_callable_stack_size_from_traversal,
         direct_callable_stack_size_from_state, continuation_stack_size, max_traversal_depth));
@@ -265,7 +267,7 @@ ProgramGroups::~ProgramGroups()
     cleanupProgramGroups(*this);
 }
 
-void Pipeline::buildOrUpdate(OptixDeviceContext& icontext, Params& iparams, std::span<MaterialCuda const> materials, bool enableInstancing, bool printSBT)
+void Pipeline::buildOrUpdate(OptixDeviceContext& icontext, Params& iparams, std::span<MaterialCuda const> materials, PipelineCommonOptions const& commonOptions, bool printSBT)
 {
     // destroy old stuff
     if (pipeline)
@@ -275,10 +277,11 @@ void Pipeline::buildOrUpdate(OptixDeviceContext& icontext, Params& iparams, std:
 
     context = icontext;
     params = &iparams;
+    this->commonOptions = &commonOptions;
 
-    createModuleAndPipelineOptions(*this, *params, enableInstancing);
+    createModuleAndPipelineOptions(*this, *params);
     createProgramGroups(*this);
-    createPipeline(*this, *params, enableInstancing);
+    createPipeline(*this, *params);
     createSBT( *this, materials );
 
 }

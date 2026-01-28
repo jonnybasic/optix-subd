@@ -28,26 +28,35 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-if (TARGET OptiX::OptiX)
-  return()
-endif()
+set(SOURCES
+    DepthPass.cpp
+    DepthPass.h
+    DepthPassParams.h
+)
 
-if (ENABLE_OPTIX)
+embed_cuda(
+  OUTPUT_TARGET
+    DepthPassDeviceCode
+  ${CUDA_COMPILATION_OUTPUT_TYPE}
+  LIBRARIES
+    OptiXToolkit::ShaderUtil
+    OptiXToolkit::Util
+  INCLUDES
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+  SOURCES
+    DepthPassDeviceCode.cu
+  HEADER
+    DepthPassEmbeddedDeviceCode.h
+  EMBEDDED_SYMBOL_NAMES
+    DepthPassEmbeddedDeviceCode
+)
 
-    include(FetchContent)
-    FetchContent_Declare(
-        optix
-        GIT_REPOSITORY https://github.com/NVIDIA/optix-dev.git
-        GIT_TAG v9.1.0
-        )
-    FetchContent_MakeAvailable(optix)
-
-
-    # Header-only library
-
-    add_library(OptiX::OptiX INTERFACE IMPORTED)
-
-    target_include_directories(OptiX::OptiX INTERFACE "${optix_SOURCE_DIR}/include")
-    
-
-endif()
+add_library(depth OBJECT ${SOURCES})
+target_include_directories(depth PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(depth PUBLIC
+    OptiXToolkit::ShaderUtil
+    OptiXToolkit::Util
+    OptiXToolkit::Gui
+    DepthPassDeviceCode
+)

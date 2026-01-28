@@ -55,6 +55,7 @@ class OptixRenderer;
 class TextureCache;
 class MaterialCache;
 
+struct DepthPass;
 struct MotionVecPass;
 struct WireframePass;
 class ClusterAccelBuilder;
@@ -168,6 +169,7 @@ class OptixSubdApp
     
     std::unique_ptr<OptixRenderer> m_optixRenderer;
 
+    std::unique_ptr<DepthPass>         m_depthPass;
     std::unique_ptr<MotionVecPass>     m_motionVecPass;
     std::unique_ptr<WireframePass>     m_wireframePass;
 
@@ -188,8 +190,6 @@ class OptixSubdApp
     std::chrono::steady_clock::time_point m_currFrameStart = {};
     std::chrono::steady_clock::time_point m_prevFrameStart = {};
     std::chrono::steady_clock::time_point m_animStart      = {};
-
-    float m_animationTime = 0.f; // elapsed time in seconds from the beginning of the animation
 
     bool m_accelBuilderNeedsUpdate = true;
 

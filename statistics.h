@@ -137,6 +137,7 @@ struct FrameSamplers
 
     GPUTimer& gpuFrameTime    = Profiler::initTimer<GPUTimer>( "GPU/frame (ms)" );
     GPUTimer& gpuRenderTime   = Profiler::initTimer<GPUTimer>( "GPU/trace (ms)" );
+    GPUTimer& gpuDenoiseTime  = Profiler::initTimer<GPUTimer>( "GPU/denoise (ms)" );
     GPUTimer& gpuBlitTime     = Profiler::initTimer<GPUTimer>( "GPU/blit (ms)" );
 
     GPUTimer& motionVecTime = Profiler::initTimer<GPUTimer>("GPU/motionVecPass (ms)");

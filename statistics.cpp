@@ -75,13 +75,14 @@ void FrameSamplers::buildUI( otk::ImGuiRenderer& renderer ) const
 
     ImGui::PopItemWidth();
 
-    std::array<GPUTimer*, 2> timers = { nullptr, nullptr };
+    std::array<GPUTimer*, 3> timers = { nullptr, nullptr, nullptr };
 
     switch( mode )
     {
         case GraphMode::Overview: {
             timers[0] = &gpuFrameTime.profile();
             timers[1] = &gpuRenderTime.profile();
+            timers[2] = &gpuDenoiseTime.profile();
         } break;
         case GraphMode::MotionVec: {
             timers[0] = &motionVecTime.profile();
@@ -113,18 +114,23 @@ void FrameSamplers::buildUI( otk::ImGuiRenderer& renderer ) const
             ImPlot::SetupAxis( ImAxis_Y2, "##hidden1", ImPlotAxisFlags_NoDecorations );
             ImPlot::SetupAxis( ImAxis_Y3, "##hidden2", ImPlotAxisFlags_NoDecorations );
 
-            float vmax = timers[0]->runningAverage() * 1.75f;
-            if( vmax < 1e-6 && timers[1] )
-                vmax = timers[1]->runningAverage() * 1.75f;
+            // Set same max value for all Y axes
+        
+            float vmax = timers[0]->runningAverage();
+            for ( uint8_t i = 1; i < timers.size(); ++i )
+            {
+                if ( !timers[i] ) continue;
+                vmax = std::max( vmax, timers[i]->runningAverage() );
+            }
+            vmax *= 1.75f;
 
-            // Constrain both Y axes to the same range for better readability
             ImPlot::SetupAxisLimits( ImAxis_Y1, 0., vmax, ImPlotCond_Always );
             ImPlot::SetupAxisLimits( ImAxis_Y2, 0., vmax, ImPlotCond_Always );
             ImPlot::SetupAxisLimits( ImAxis_Y3, 0., vmax, ImPlotCond_Always );
         }
 
 
-        for( uint8_t i = 0; i < 2; ++i )
+        for( uint8_t i = 0; i < timers.size(); ++i )
         {
             if (!timers[i])
                 continue;
@@ -145,12 +151,17 @@ void FrameSamplers::buildUI( otk::ImGuiRenderer& renderer ) const
     static Sampler<float> trisPerSec;
     if( Profiler::get().isRecording() )
     {
-        auto const& ac   = clusterAccelSamplers.buildGasTime.profile();
-        auto const& tess = clusterAccelSamplers.clusterFillTime.profile();
+        auto const& ct = clusterAccelSamplers.clusterTilingTime.profile();
+        auto const& cf = clusterAccelSamplers.clusterFillTime.profile();
+        auto const& bc = clusterAccelSamplers.buildClasTime.profile();
+        auto const& bg = clusterAccelSamplers.buildGasTime.profile();
+
+        const float tessTime  = ct.latest + cf.latest;
+        const float buildTime = bg.latest + bc.latest;
 
         uint32_t ntris = clusterAccelSamplers.numTriangles.latest;
 
-        trisPerSec.push_back( static_cast<float>( 1000. * double( ntris ) / double( ac.latest + tess.latest ) ) );
+        trisPerSec.push_back( static_cast<float>( 1000. * double( ntris ) / double( tessTime + buildTime ) ) );
     }
 
     if( ImPlot::BeginPlot( "BVH Throughput", ImVec2( -1, 150*fontScale ) ) )

@@ -190,6 +190,9 @@ GBuffer::GBuffer( uint2 rendersize, uint2 targetsize )
     ::create( m_motionvecs, rendersize );
     ::create( m_color, rendersize );
     ::create( m_depth, rendersize );
+    ::create( m_specular, rendersize );
+    ::create( m_roughness, rendersize );
+    ::create( m_specularHitT, rendersize );
 
     ::create( m_depthHires, targetsize );
     ::create( m_denoised, targetsize );
@@ -284,9 +287,11 @@ void GBuffer::blit( Channel channel, uchar4* output, uint2 outputSize, CUstream 
         case Channel::MOTIONVECS:    launchKernel( m_motionvecs ); break;
         case Channel::DEPTH:         launchKernel( m_depth ); break;
         case Channel::DEPTH_HIRES:   launchKernel( m_depthHires ); break;
-
         case Channel::DENOISED:      launchKernel( m_denoised, sRGB_Operator{} ); break;
         case Channel::COLOR:         launchKernel( m_color, sRGB_Operator{} ); break;
+        case Channel::SPECULAR:      launchKernel( m_specular ); break;
+        case Channel::ROUGHNESS:     launchKernel( m_roughness ); break;
+        case Channel::SPECULAR_HIT_T: launchKernel( m_specularHitT ); break;
     }
 }
 
