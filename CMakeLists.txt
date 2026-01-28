@@ -32,8 +32,13 @@
 # Include developer's "private.cmake" (if any) for ad hoc customization.
 include( "private.cmake" OPTIONAL )
 
-# Minimum version of cmake to support OptiXIR compilation
-cmake_minimum_required(VERSION 3.27.7 FATAL_ERROR)
+
+if(WIN32)
+    # newer cmake has better optixir support with MSVC
+    cmake_minimum_required(VERSION 3.27.7 FATAL_ERROR)
+else()
+    cmake_minimum_required(VERSION 3.25.3 FATAL_ERROR)
+endif()
 
 # Temporarily quiet some warnings related to FetchContent usage
 if(POLICY CMP0169)
@@ -56,9 +61,19 @@ endif()
 # default CUDA arch.  This needs to be declared before any project(... CUDA) lines
 set(CMAKE_CUDA_ARCHITECTURES "86" CACHE STRING "")
 
+
 project(OptixSubd LANGUAGES C CXX CUDA VERSION 1.13.0)
 
+find_package(CUDAToolkit 12.0 REQUIRED)
+
 message(STATUS "CMAKE_CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
+
+# Dynamically link against the CUDA runtime
+if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "13.0")
+  set(CMAKE_CUDA_RUNTIME_LIBRARY "Hybrid")
+else()
+  set(CMAKE_CUDA_RUNTIME_LIBRARY "Shared")
+endif()
 
 # C++ standards
 
@@ -93,9 +108,6 @@ if(MSVC)
 else()
     # Ignore warnings from some third party headers by including them with -isystem
     include_directories(SYSTEM
-      ${CMAKE_CURRENT_LIST_DIR}/extern/osd_lite
-      ${CMAKE_CURRENT_LIST_DIR}/extern/osd_lite/opensubdiv
-      ${CMAKE_CURRENT_LIST_DIR}/extern/osd_lite/opensubdiv/tmr
       ${CMAKE_CURRENT_LIST_DIR}/texture
       ${CMAKE_BINARY_DIR}/_deps/implot-src
       ${CMAKE_BINARY_DIR}/_deps/imgui-src
@@ -129,7 +141,6 @@ add_compile_options($<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo>
 add_compile_options($<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo>)
 
 
-find_package( CUDAToolkit 12.0 REQUIRED )
 
 
 # TBB (optional) needed for C++17 parallel algorithms on gcc
@@ -157,11 +168,19 @@ add_library(glad::glad ALIAS glad)
 
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/optix-toolkit EXCLUDE_FROM_ALL)
 
+# Make OptiX Toolkit use dynamic CUDA runtime
+set(OTK_LINK_CUDA_STATIC OFF CACHE BOOL "Enable static linking against the cuda run-time" FORCE)
 
 # OSD
 add_definitions(-D_USE_MATH_DEFINES)
-set(OSD_LITE_FOLDER_NAME "external/osd_lite")
-add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/extern/osd_lite EXCLUDE_FROM_ALL)
+include(CMake/FetchOsdLite.cmake)
+
+# optional DLSS
+
+option(ENABLE_DLSS "Enable DLSS support if found" ON)
+if(ENABLE_DLSS)
+    include(CMake/FetchDLSS.cmake)
+endif()
 
 
 # Build configuration
@@ -207,6 +226,7 @@ if (MSVC)
 endif()
 
 add_subdirectory(cluster_builder)
+add_subdirectory(depth)
 add_subdirectory(material)
 add_subdirectory(motionvec)
 add_subdirectory(profiler)
@@ -219,8 +239,8 @@ set( optixSubd_SOURCES )
 list( APPEND optixSubd_SOURCES
     args.cpp
     args.h
-    denoiserstub.h
-    denoiserstub.cu
+    denoiser.h
+    denoiserAccum.cu
     GBuffer.cu
     GBuffer.h
     GBuffer.cuh
@@ -241,10 +261,14 @@ list( APPEND optixSubd_SOURCES
     version.cpp
 )
 
+if(DLSS_FOUND AND ENABLE_DLSS)
+    list(APPEND optixSubd_SOURCES denoiserDlss.cu)
+endif()
 
 add_executable( optixSubd
     ${optixSubd_SOURCES}
     $<TARGET_OBJECTS:cluster_builder>
+    $<TARGET_OBJECTS:depth>
     $<TARGET_OBJECTS:material>
     $<TARGET_OBJECTS:motionvec>
     $<TARGET_OBJECTS:profiler>
@@ -256,11 +280,13 @@ add_executable( optixSubd
 target_include_directories( optixSubd PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_BINARY_DIR}/EmbeddedDeviceCode
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CUDAToolkit_INCLUDE_DIRS}  # Add CUDA include paths to help find system headers
 )
 
 target_link_libraries( optixSubd
   PRIVATE
     EmbeddedDeviceCode
+    DepthPassDeviceCode
     OptiXToolkit::Gui
     OptiXToolkit::Util
     OptiXToolkit::ShaderUtil
@@ -274,6 +300,11 @@ target_link_libraries( optixSubd
     ${CMAKE_DL_LIBS}  
 )
 
+if(DLSS_FOUND AND ENABLE_DLSS)
+    target_compile_definitions(optixSubd PRIVATE DLSS_ENABLED)
+    target_link_libraries(optixSubd PRIVATE DLSS::DLSS)
+    dlss_setup_runtime_dependencies(optixSubd)
+endif()
 
 # Optionally link tbb for parallel C++17 algorithms on gcc
 if ( TBB_FOUND )
@@ -301,6 +332,7 @@ endif()
 # dependencies are not compatible with more strict warnings.
 foreach(TARGET
   #cluster_builder
+  depth
   material
   motionvec
   profiler

@@ -229,7 +229,6 @@ OptixSubdGUI::OptixSubdGUI( OptixSubdApp& app, UIData& ui )
     const Scene::Attributes& attrs = m_app.getScene().getAttributes();
 
     setAnimationRange( attrs.frameRange, attrs.frameRate );
-
 }
 
 OptixSubdGUI::~OptixSubdGUI() = default;
@@ -538,15 +537,6 @@ void OptixSubdGUI::buildUI_internal( int2 window_size )
         if (ImGui::IsItemHovered() && m_imgui->HoveredIdTimer > .5f)
             ImGui::SetTooltip("Display subd cage");
 
-        // AO samples
-        {
-            int n = static_cast<int>( std::sqrt( renderer.getAOSamples() ) - 1 );
-            if( ImGui::Combo( "AO samples", &n, " 1x\0 4x\0 9x\0 16x\0 25x\0 36x\0 49x\0 64x\0" ) )
-            {
-                renderer.setAOSamples( (n+1) * (n+1) );
-            }
-        }
-
         int colorMode = (int)renderer.getColorMode();
         if( ImGui::Combo( "Color Mode", &colorMode,
                           "Base Color\0Triangle\0Surface Normal\0Tex Coord\0Material\0"
@@ -556,24 +546,93 @@ void OptixSubdGUI::buildUI_internal( int2 window_size )
         }
 
         int channel = (int)renderer.getDisplayChannel();
-        if( ImGui::Combo( "Display Channel", &channel, "Albedo\0Normals\0MotionVecs\0Color\0Depth\0Hires Depth\0Accum/Denoised\0" ) )
+        if( ImGui::Combo( "Display Channel", &channel, "Albedo\0Normals\0MotionVecs\0Color\0Depth\0Hires Depth\0Accum/Denoised\0Specular\0Roughness\0Specular Hit T\0" ) )
         {
             renderer.setDisplayChannel( GBuffer::Channel( channel ) );
-        }
-
-        float3 missColor = renderer.getMissColor();
-        if( ImGui::ColorEdit3( "Miss Color", &missColor.x, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_PickerHueWheel ) )
-        {
-            renderer.setMissColor( missColor );
         }
 
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
-
     }
     ImGui::PopStyleColor();
     ImGui::Spacing();
+
+    ImGui::PushStyleColor( ImGuiCol_Header, ImVec4( 0.5f, 0.4f, 0.35f, 1.f ) );
+    if( ImGui::CollapsingHeader( "Lighting" ) )
+    {
+        float elevation = renderer.getSunElevation();
+        float azimuth   = renderer.getSunAzimuth();
+
+        bool changed = false;
+        changed |= ImGui::SliderFloat( "Sun Elevation", &elevation, -90.0f, 90.0f );
+        if( ImGui::IsItemHovered() && m_imgui->HoveredIdTimer > .5f )
+            ImGui::SetTooltip( "Vertical angle of the sun." );
+        changed |= ImGui::SliderFloat( "Sun Azimuth", &azimuth, -180.0f, 180.0f );
+        if( ImGui::IsItemHovered() && m_imgui->HoveredIdTimer > .5f )
+            ImGui::SetTooltip( "Horizontal angle of the sun." );
+
+        if( changed )
+            renderer.setSunAngles( elevation, azimuth );
+
+        float sunIntensity = renderer.getSunIntensity();
+        if( ImGui::SliderFloat( "Sun Intensity", &sunIntensity, 0.f, 2.f ) )
+            renderer.setSunIntensity( sunIntensity );
+
+        if( ImGui::Button( "Reset Lighting" ) )
+        {
+            renderer.resetLighting();
+        }
+
+        float diffuse = renderer.getGlobalDiffuse();
+        if( ImGui::SliderFloat( "Diffuse (Kd)", &diffuse, 0.f, 1.f ) )
+            renderer.setGlobalDiffuse( diffuse );
+
+        float specular = renderer.getGlobalSpecular();
+        // Use a logarithmic slider for finer control over common dielectric values.
+        // The min value must be > 0 for a log slider.
+        if( ImGui::SliderFloat( "Specular (Ks)", &specular, 0.001f, 1.f, "%.3f", ImGuiSliderFlags_Logarithmic ) )
+            renderer.setGlobalSpecular( specular );
+
+        float roughness = renderer.getGlobalRoughness();
+        if( ImGui::SliderFloat( "Roughness", &roughness, 0.f, 1.f ) )
+            renderer.setGlobalRoughness( roughness );
+
+        if( ImGui::Button( "Reset Material" ) )
+        {
+            renderer.resetMaterial();
+        }
+    }
+
+    ImGui::PopStyleColor();
+    ImGui::Spacing();
+
+#if DLSS_ENABLED
+    ImGui::PushStyleColor( ImGuiCol_Header, ImVec4( 0.35f, 0.35f, 0.5f, 1.f ) );
+    if( ImGui::CollapsingHeader( "Denoiser", ImGuiTreeNodeFlags_DefaultOpen ) )
+    {
+        bool dlssEnabled = renderer.getDlssEnabled();
+        if( ImGui::Checkbox( "DLSS", &dlssEnabled ) )
+        {
+            renderer.setDlssEnabled( dlssEnabled );
+        }
+
+        if (dlssEnabled)
+        {
+            ImGui::Indent();
+            DlssQualityMode currentMode = renderer.getDlssQualityMode();
+            const char* modes[] = { "DLAA", "Max Quality", "Balanced", "Max Performance", "Ultra Performance" };
+            int currentIdx = static_cast<int>(currentMode);
+            if (ImGui::Combo("Quality Mode", &currentIdx, modes, IM_ARRAYSIZE(modes)))
+            {
+                renderer.setDlssQualityMode(static_cast<DlssQualityMode>(currentIdx));
+            }
+            ImGui::Unindent();
+        }
+    }
+    ImGui::PopStyleColor();
+    ImGui::Spacing();
+#endif
 
     ImGui::PushStyleColor( ImGuiCol_Header, ImVec4( .4f, .3f, .35f, 1.f ) );
     if( ImGui::CollapsingHeader( "Tessellation", ImGuiTreeNodeFlags_DefaultOpen ) )

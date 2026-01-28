@@ -131,6 +131,13 @@ __forceinline__ __device__ float3 cosineSampleHemisphere( float2 u )
     return make_float3( d.x, d.y, z );
 }
 
+__forceinline__ __device__ float3 cosinePowerSampleHemisphere( float shininess, float2 u )
+{
+    const float phi = 2.f * M_PIf * u.x;
+    const float cos_theta = powf(u.y, 1.f / (shininess + 1.f));
+    const float sin_theta = sqrtf(fmaxf(0.f, 1.f - cos_theta*cos_theta));
+    return make_float3(cosf(phi) * sin_theta, sinf(phi) * sin_theta, cos_theta);
+}
 
 __device__ inline
 float3 temperature( const float t )

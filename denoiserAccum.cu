@@ -28,6 +28,8 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 
+#include "denoiser.h"
+
 #include <OptiXToolkit/ShaderUtil/color.h>
 #include <OptiXToolkit/ShaderUtil/vec_math.h>
 #include "shadingTypes.h"
@@ -61,12 +63,14 @@ void accumulationKernel( const RwFloat4 input, RwFloat4 output, int subframe )
     gbuffer::write( c, output, idx );
 }
 
-void denoise( GBuffer& gbuffer, int subframe )
+void AccumulationDenoiser::denoise( GBuffer& gbuffer, int subframe, const otk::Matrix4x4& viewMatrix, const otk::Matrix4x4& projMatrix, const float2& jitter )
 {
     // Stub placeholder for DLSS.
     // Just accumulates when the camera stops moving.  No motion vecs or TAA
+    // Note: We don't use the matrices or jitter parameters in this simple accumulation denoiser
 
-    if ( !gbuffer.m_color.isValid() || !gbuffer.m_denoised.isValid() ) return;
+    if ( !gbuffer.m_color.isValid() || !gbuffer.m_denoised.isValid() ) 
+        return;
 
     const int blockSize1D = 32;
     const uint2 targetsize = gbuffer.m_denoised.m_size;
@@ -75,5 +79,7 @@ void denoise( GBuffer& gbuffer, int subframe )
     
     accumulationKernel<<<numBlocks, numThreadsPerBlock>>>( gbuffer.m_color, gbuffer.m_denoised, subframe );
 }
+
+
 
 

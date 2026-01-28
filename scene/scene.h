@@ -88,7 +88,7 @@ class Scene
 
     bool reloadAnimations();
 
-    void animate( const FrameTime& frameTime );
+    bool animate( const FrameTime& frameTime, bool& isDiscontinuous );
 
     void clearMotionCache();
 
@@ -129,6 +129,7 @@ class Scene
 
     // animations
     std::vector<std::unique_ptr<Animation>> m_animations;
+    float m_lastAnimationTime = -1.0f;
 
     // cameras
     std::unique_ptr<View> m_defaultView;

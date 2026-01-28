@@ -104,7 +104,11 @@ function(embed_cuda)
   if(EMBED_CUDA_PTX)
     set_property(TARGET ${CUDA_TARGET} PROPERTY CUDA_PTX_COMPILATION ON)
   else()
-    set_property(TARGET ${CUDA_TARGET} PROPERTY CUDA_OPTIX_COMPILATION ON)
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.27.7")
+      set_property(TARGET ${CUDA_TARGET} PROPERTY CUDA_OPTIX_COMPILATION ON)
+    else()
+      target_compile_options(${CUDA_TARGET} PRIVATE "-optix-ir")
+    endif()
   endif()
  
 

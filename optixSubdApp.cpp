@@ -37,6 +37,7 @@
 #include <scene/shapeUtils.h>
 
 
+#include <depth/DepthPass.h>
 #include <material/materialCache.h>
 #include <material/materialCuda.h>
 #include <motionvec/motionvec.h>
@@ -170,6 +171,10 @@ void OptixSubdApp::loadScene(
     if( m_scene = Scene::create( filepath, mediapath, frameRange, m_args ) )
     {
         renderer.setMaterials( m_scene->getMaterialCache().getDeviceData() );
+        renderer.resetDenoiser();
+        renderer.resetSubframes();
+
+        m_depthPass = std::make_unique<DepthPass>(renderer.getContext(), renderer.getCommonPipelineOptions());
 
         m_motionVecPass = std::make_unique<MotionVecPass>();
 
@@ -233,6 +238,9 @@ void OptixSubdApp::renderSubframe()
     gbuffer.map();
 
     renderer.launchSubframe( m_stream );
+
+    // run high res depth pass
+    m_depthPass->render( renderer.getContext(), m_stream, renderer.getParams().handle, m_camera, gbuffer.m_depthHires );
 
     m_motionVecPass->run( *m_scene, m_args.dispScale, m_args.dispBias, m_camera, m_prevCamera, renderer.getParams().jitter,
                           renderer.getHitBuffer(), gbuffer );
@@ -311,18 +319,16 @@ void OptixSubdApp::renderInteractiveSubframe( float animTime, float frameRate )
     profiler.frameStart(m_currFrameStart);  
 
 
-    if ( m_animationTime != animTime )
+    bool isDiscontinuous = false;
+    if( m_scene->animate( FrameTime{ animTime, frameRate }, isDiscontinuous ) )
     {
         // Update scene to current time
         auto& renderer = getOptixRenderer();
-        m_scene->animate( FrameTime{ animTime, frameRate } );
+        if( isDiscontinuous )
+        {
+            renderer.resetDenoiser();
+        }
         renderer.resetSubframes();
-        m_animationTime = animTime;
-    } 
-    else 
-    {
-        // Stop caching animated vertices when playback is off
-        m_scene->clearMotionCache();
     }
     updateCamera( m_scene->getView(), true );
 
@@ -415,7 +421,6 @@ OptixRenderer& OptixSubdApp::getOptixRenderer()
         OptixRenderer::Options rendererOptions{
             .output_buffer_type = outputBufferType,
             .output_target_resolution = m_args.targetResolution,
-            .enable_instancing  = true,
             .print_sbt          = false,
             .log_level          = m_args.logLevel,
         };

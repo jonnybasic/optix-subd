@@ -30,7 +30,7 @@
 
 // clang-format off
 #include "optixRenderer.h"
-#include "denoiserstub.h"
+#include "denoiser.h"
 
 #include <statistics.h>
 #include <utils.h>
@@ -52,7 +52,26 @@
 #ifndef __GNUC__
 #include <format>
 #endif
+#if defined(_WIN32) && !defined(_USE_MATH_DEFINES)
+    #define _USE_MATH_DEFINES
+#endif
+#include <cmath>
 // clang-format on
+
+namespace
+{
+    float3 anglesToDirection( float elevation, float azimuth )
+    {
+        const float elevationRad = elevation * (float)M_PI / 180.0f;
+        const float azimuthRad   = azimuth * (float)M_PI / 180.0f;
+
+        float3 dir;
+        dir.x = sinf( azimuthRad ) * cosf( elevationRad );
+        dir.y = sinf( elevationRad );
+        dir.z = cosf( azimuthRad ) * cosf( elevationRad );
+        return dir;
+    }
+}
 
 bool operator == (float3 const& a, float3 const& b)
 {
@@ -79,6 +98,7 @@ const static float2  HaltonPoints[NumHaltonPoints] = {
     { 0.015625f, 0.790123f }, { 0.515625f, 0.234568f }, { 0.265625f, 0.567901f }, { 0.765625f, 0.901235f },
 };
 
+static const float3 g_sunBaseColor = {1.0f, 1.0f, 0.9f};
 
 OptixRenderer::OptixRenderer( Options const& opts )
     : m_options( opts )
@@ -87,6 +107,17 @@ OptixRenderer::OptixRenderer( Options const& opts )
  
     CUDA_CHECK( cudaMalloc( reinterpret_cast<void**>( &m_d_params ), sizeof( Params ) ) );
 
+#if DLSS_ENABLED
+    // TODO: uncomment once we have a driver that supports this
+    // getFeatureReqs();
+    initDlss();
+    m_denoiser = std::make_unique<DlssDenoiser>();
+#else
+    m_denoiser = std::make_unique<AccumulationDenoiser>();
+#endif
+
+    resetLighting();
+    resetMaterial();
 }
 
 OptixRenderer::~OptixRenderer()
@@ -97,6 +128,13 @@ OptixRenderer::~OptixRenderer()
 
     CUDA_CHECK_NOTHROW( cudaFree( reinterpret_cast<void*>( m_d_params ) ) );
 
+#if DLSS_ENABLED
+    // Explicitly destroy denoiser before DLSS shutdown to ensure proper cleanup order
+    m_denoiser.reset();
+    shutdownDlss();
+#endif
+
+    // Destroy OptiX context last since it might be using CUDA
     OPTIX_CHECK( optixDeviceContextDestroy( m_context ) );
 }
 
@@ -126,7 +164,7 @@ void OptixRenderer::buildOrUpdatePipelines()
 {
     if (m_pipelinesNeedsUpdate)
     {
-        m_pipeline.buildOrUpdate(m_context, m_params, m_materials, m_options.enable_instancing, m_options.print_sbt);
+        m_pipeline.buildOrUpdate(m_context, m_params, m_materials, m_commonOptions, m_options.print_sbt);
 
         resetSubframes();
 
@@ -173,10 +211,14 @@ void OptixRenderer::resizeOutputBuffers( uint2 targetsize, CUstream stream )
     OTK_REQUIRE( m_output_buffer );
     m_output_buffer->resize( targetsize.x, targetsize.y );
 
-    if( !m_gbuffer || ( targetsize != m_gbuffer->m_targetsize ) )
+    // Get optimal render resolution for current settings
+    uint2 rendersize = m_denoiser->getOptimalRenderResolution(targetsize);
+
+    // Create new GBuffer if target size changed OR render size changed
+    if( !m_gbuffer || 
+        ( targetsize != m_gbuffer->m_targetsize ) || 
+        ( rendersize != m_gbuffer->m_rendersize ) )
     {
-        // since we don't have DLSS yet, render res and target res are the same
-        const uint2 rendersize = targetsize;
 
         m_hitBuffer.resize( rendersize.x * rendersize.y );
         m_hitBuffer.set(0);
@@ -193,23 +235,30 @@ void OptixRenderer::launchSubframe( CUstream stream )
 
     assert(m_pipeline.pipeline);
 
-    auto& buffer = getOutputBuffer();
-
-    m_params.frame_buffer = buffer.map();
-
     OTK_REQUIRE( m_gbuffer );
 
     m_params.aovAlbedo = m_gbuffer->m_albedo;
     m_params.aovNormals = m_gbuffer->m_normals;
     m_params.aovColor = m_gbuffer->m_color;
     m_params.aovDepth = m_gbuffer->m_depth;
-    m_params.aovDepthHires = m_gbuffer->m_depthHires;
+    m_params.aovSpecular = m_gbuffer->m_specular;
+    m_params.aovRoughness = m_gbuffer->m_roughness;
+    m_params.aovSpecularHitT = m_gbuffer->m_specularHitT;
 
-    // DLSS-style uniform jitter per frame
-    // m_params.jitter =  HaltonPoints[m_params.frame_index % NumHaltonPoints];
-
-    // ... or per sub frame when DLSS isn't hooked up
+#if DLSS_ENABLED
+    if ( m_dlssEnabled )
+    {
+        // DLSS can handle motion, so use frame index
+        m_params.jitter = HaltonPoints[m_params.frame_index % NumHaltonPoints];
+    }
+    else
+    {
+        // simple accumulation denoiser doesn't support motion
+        m_params.jitter = HaltonPoints[m_params.subframe_index % NumHaltonPoints];
+    }
+#else
     m_params.jitter =  HaltonPoints[m_params.subframe_index % NumHaltonPoints];
+#endif
 
     CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(m_d_params), &m_params, sizeof(Params), cudaMemcpyHostToDevice, stream));
 
@@ -224,7 +273,6 @@ void OptixRenderer::launchSubframe( CUstream stream )
     ++m_params.subframe_index;
     ++m_params.frame_index;
 
-    buffer.unmap();
 }
 
 void OptixRenderer::resetSubframes()
@@ -232,10 +280,23 @@ void OptixRenderer::resetSubframes()
     m_params.subframe_index = 0;
 }
 
+void OptixRenderer::resetDenoiser()
+{
+    m_denoiser->reset();
+}
+
 void OptixRenderer::denoise()
 {
     OTK_REQUIRE( m_gbuffer );
-    ::denoise( *m_gbuffer, m_params.subframe_index-1 );
+    stats::frameSamplers.gpuDenoiseTime.start();
+    m_denoiser->denoise( *m_gbuffer, m_params.subframe_index-1, m_params.viewMatrix, m_params.projectionMatrix, m_params.jitter );
+    PostProcessParams params = {
+        .viewMatrix = m_params.viewMatrix,
+        .projMatrix = m_params.projectionMatrix,
+        .envLight = m_params.envLight
+    };
+    m_denoiser->postProcess( *m_gbuffer, params );
+    stats::frameSamplers.gpuDenoiseTime.stop();
 }
 
 std::optional<float4> OptixRenderer::pick( uint2 pick_pos, bool yflip )
@@ -277,16 +338,105 @@ void OptixRenderer::setColorMode(ColorMode colorMode)
     resetSubframes();
 }
 
-void OptixRenderer::setAOSamples(int aoSamples)
+void OptixRenderer::setDlssEnabled(bool dlssEnabled)
 {
-    m_params.aoSamples = aoSamples;
+    if ( m_dlssEnabled == dlssEnabled )
+        return;
+
+    m_dlssEnabled = dlssEnabled;
+
+#if DLSS_ENABLED
+    if ( m_dlssEnabled )
+    {
+        m_denoiser = std::make_unique<DlssDenoiser>();
+        // Apply current quality mode to new denoiser
+        static_cast<DlssDenoiser*>(m_denoiser.get())->setQualityMode(m_qualityMode);
+    }
+    else
+#endif 
+    {
+        m_denoiser = std::make_unique<AccumulationDenoiser>();
+    }
+
+    // Force output buffer resize to update render resolution for the new denoiser
+    if (m_gbuffer)
+        resizeOutputBuffers( m_gbuffer->m_targetsize );
+
+    resetSubframes();
 }
 
-
-void OptixRenderer::setMissColor(float3 missColor)
+void OptixRenderer::setGlobalDiffuse(float diffuse)
 {
-    m_params.missColor = missColor;
+    if (diffuse == m_params.globalDiffuse)
+        return;
+    m_params.globalDiffuse = diffuse;
     resetSubframes();
+}
+
+float OptixRenderer::getGlobalDiffuse() const
+{
+    return m_params.globalDiffuse;
+}
+
+void OptixRenderer::setGlobalSpecular(float specular)
+{
+    if (specular == m_params.globalSpecular)
+        return;
+    m_params.globalSpecular = specular;
+    resetSubframes();
+}
+
+float OptixRenderer::getGlobalSpecular() const
+{
+    return m_params.globalSpecular;
+}
+
+void OptixRenderer::setGlobalRoughness(float roughness)
+{
+    if (roughness == m_params.globalRoughness)
+        return;
+    m_params.globalRoughness = roughness;
+    resetSubframes();
+}
+
+float OptixRenderer::getGlobalRoughness() const
+{
+    return m_params.globalRoughness;
+}
+
+void OptixRenderer::setSunAngles(float elevation, float azimuth)
+{
+    m_sunElevation = elevation;
+    m_sunAzimuth   = azimuth;
+
+    m_params.envLight.sunDir = anglesToDirection( m_sunElevation, m_sunAzimuth );
+
+    resetSubframes();
+}
+
+void OptixRenderer::setSunIntensity(float intensity)
+{
+    m_sunIntensity = intensity;
+    m_params.envLight.sunColor = g_sunBaseColor * m_sunIntensity;
+    resetSubframes();
+}
+
+float OptixRenderer::getSunIntensity() const
+{
+    return m_sunIntensity;
+}
+
+void OptixRenderer::resetLighting()
+{
+    setSunAngles( kDefaultSunElevation, kDefaultSunAzimuth );
+    setSunIntensity( 0.3f );
+}
+
+void OptixRenderer::resetMaterial()
+{
+    setGlobalDiffuse( 1.0f );
+    setGlobalSpecular( 0.03f );
+    setGlobalRoughness( 0.15f );
 }
 
 void OptixRenderer::setWireframe(bool wireframe)
@@ -421,5 +571,21 @@ OptixRenderer::blitFramebuffer( CUstream stream )
     getOutputBuffer().unmap();
 
     stats::frameSamplers.gpuBlitTime.stop();    
+}
+
+void OptixRenderer::setDlssQualityMode(DlssQualityMode mode)
+{
+    if (mode == m_qualityMode)
+        return;
+
+    m_qualityMode = mode;
+
+#if DLSS_ENABLED
+    if (m_dlssEnabled) {
+        static_cast<DlssDenoiser*>(m_denoiser.get())->setQualityMode(mode);
+        // Resize buffers to use new optimal render resolution
+        resizeOutputBuffers(m_gbuffer->m_targetsize);
+    }
+#endif
 }
 

@@ -31,6 +31,7 @@
 #include "GBuffer.cuh"
 #include "shadingTypes.h"
 #include "utils.cuh"
+#include "lighting.cuh"
 
 #include <OptiXToolkit/ShaderUtil/color.h>
 #include <OptiXToolkit/ShaderUtil/vec_math.h>
@@ -39,6 +40,7 @@
 
 #include <optix.h>
 #include <optix_device.h>
+#include <math_constants.h>
 
 #include <cluster_builder/cluster.h>
 #include <material/materialCuda.h>
@@ -475,12 +477,12 @@ float3 getMaterialBaseColor( const IntersectionRecord ir, unsigned& seed )
         {
             baseColor = getClusterColor( primIdx );
         }
-    }
+    }   
     return baseColor;
 }
 
 __device__ inline 
-float occlusion( OptixTraversableHandle handle, float3 rayOrigin, float3 rayDirection )
+float visibility( OptixTraversableHandle handle, float3 rayOrigin, float3 rayDirection )
 {
     
     optixTraverse( handle, rayOrigin, rayDirection,
@@ -491,73 +493,152 @@ float occlusion( OptixTraversableHandle handle, float3 rayOrigin, float3 rayDire
                 OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT | OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT | OPTIX_RAY_FLAG_DISABLE_ANYHIT,
                 0,        // SBT offset
                 0,        // SBT stride
-                RAY_TYPE_OCCLUSION );
+                0 );
 
-    float occluded = optixHitObjectIsMiss() ? 0.0f : 1.0f;
-    return occluded;
+    float vis = optixHitObjectIsMiss() ? 1.0f : 0.0f;
+    return vis;
 
 }
 
-
-__device__ inline 
-float3 aoSample( const float3 normal, const float2 u )
-{
-    const Onb onb{ normal };
-    float3    dir = cosineSampleHemisphere( u );
-    dir = onb.toWorld( dir );
-    return normalize(dir);
-}
 
 extern "C"
 __global__ void __closesthit__radiance()
 {
     const float hitT = optixGetRayTmax();
-    
     const IntersectionRecord ir = makeIntersectionRecord();
-    float3 pathWeight = make_float3(1.f); 
-
     const uint2 idx = make_uint2( optixGetLaunchIndex() );
 
+    // Get bounce count
+    const unsigned bounce = optixGetPayload_0();
+
+    // Get the accumulated path weight so far
+    float3 pathWeight = make_float3(
+        __uint_as_float( optixGetPayload_1() ),
+        __uint_as_float( optixGetPayload_2() ),
+        __uint_as_float( optixGetPayload_3() )
+    );
+
+    unsigned seed = optixGetPayload_4();
+    const float3 baseColor = getMaterialBaseColor( ir, seed );
+
+    const float3 diffuseColor = baseColor * params.globalDiffuse * ir.wireframeMask;
+
+    // Ignore material specular for now and apply global specular overrides to show off DLSS
+    const float3 specularColor = make_float3(params.globalSpecular) * ir.wireframeMask;
+    const float  roughness     = params.globalRoughness;
+    const float  shininess     = roughnessToShininess( roughness );
+
+    // --- Explicit Light Sampling (Next Event Estimation) ---
+    float3 direct_radiance = make_float3(0.f);
     {
-        unsigned seed = optixGetPayload_3();
-        const float3 baseColor = getMaterialBaseColor( ir, seed );
+        const float3 L = sampleSunLobe( make_float2(rnd(seed), rnd(seed)), params.envLight );
 
-        // Super-sample hemisphere AO
-        const int strataCount = (int)sqrtf( params.aoSamples );
-        float occl  = 0.f;
-        for( int k = 0; k < params.aoSamples; ++k )
+        const float  NdotL  = fmaxf(0.f, dot(ir.n, L));
+
+        // Cast a shadow ray to check for occlusion
+        const float vis = visibility( params.handle, ir.p, L );
+
+        // Calculate contribution from the sun, scaled by visibility
+
+        const float3 sun_radiance = sunRadiance(L, params.envLight);
+ 
+        const float3 fr_diffuse = evaluateLambertian( diffuseColor );
+
+        const float3 V       = -optixGetWorldRayDirection();
+        const float3 H       = normalize( L + V );
+        const float  NdotH   = fmaxf( 0.f, dot( ir.n, H ) );
+        const float  VdotH   = fmaxf( 0.f, dot( V, H ) );
+
+        const float3 F = fresnelSchlick( specularColor, VdotH );
+
+        const float fr_specular = evaluateBlinnPhong( shininess, NdotH );
+
+        const float3 direct_contrib = ( ( make_float3( 1.f ) - F ) * fr_diffuse + F * fr_specular ) * sun_radiance * NdotL * vis;
+
+        direct_radiance = pathWeight * direct_contrib;
+    }
+
+    // The radiance for this bounce is the contribution from direct light sampling.
+    optixSetPayload_10( __float_as_uint( direct_radiance.x ) );
+    optixSetPayload_11( __float_as_uint( direct_radiance.y ) );
+    optixSetPayload_12( __float_as_uint( direct_radiance.z ) );
+
+    // --- Indirect Light Sampling (BSDF Sampling) ---
+
+    float3 newPathWeight = {0};
+    float3 L = {0};
+
+    const float3 V     = -optixGetWorldRayDirection();
+    const float  NdotV = fmaxf( 0.f, dot( ir.n, V ) );
+
+    const float3 F           = fresnelSchlick( specularColor, NdotV );
+    const float  p_specular = fmaxf( F.x, fmaxf( F.y, F.z ) );
+
+    if( rnd( seed ) < p_specular )
+    {
+        // Specular bounce
+        float pdf = 0.f;
+        L = sampleBlinnPhong( ir.n, V, shininess, make_float2( rnd( seed ), rnd( seed ) ), pdf );
+        
+        const float NdotL = fmaxf( 0.f, dot( ir.n, L ) );
+
+        if( pdf > 0.f && NdotL > 0.f )
         {
-            const float2 rs = randomStrat( k, strataCount, seed );
-            const float3 L        = aoSample( ir.n, rs );
-            occl += occlusion( params.handle, ir.p, L );
+            const float3 H         = normalize( L + V );
+            const float  NdotH     = fmaxf( 0.f, dot( ir.n, H ) );
+            const float  VdotH     = fmaxf( 0.f, dot( V, H ) );
+
+            const float  fr_specular = evaluateBlinnPhong( shininess, NdotH );
+            const float3 F_bounce    = fresnelSchlick( specularColor, VdotH );
+
+            newPathWeight = pathWeight * F_bounce * fr_specular * NdotL / ( pdf * p_specular );
         }
-        occl /= params.aoSamples;
-        pathWeight *= baseColor * ( 1.0f - occl ) * ir.wireframeMask;
+    }
+    else
+    {
+        // Diffuse bounce
+        L             = sampleLambertian( ir.n, make_float2( rnd( seed ), rnd( seed ) ) );
+        newPathWeight = pathWeight * diffuseColor;
+    }
 
-        optixSetPayload_0( __float_as_uint( pathWeight.x ) );
-        optixSetPayload_1( __float_as_uint( pathWeight.y ) );
-        optixSetPayload_2( __float_as_uint( pathWeight.z ) );
-        optixSetPayload_3( seed );
 
+    // Set the payload for the next bounce
+    optixSetPayload_1( __float_as_uint( newPathWeight.x ) );
+    optixSetPayload_2( __float_as_uint( newPathWeight.y ) );
+    optixSetPayload_3( __float_as_uint( newPathWeight.z ) );
+    optixSetPayload_4( seed );
+    optixSetPayload_5( packNormalizedVector( L ) );
+    optixSetPayload_6( __float_as_uint( hitT ) );
+    optixSetPayload_7( __float_as_uint( ir.p.x ) );  // Set hit point coordinates
+    optixSetPayload_8( __float_as_uint( ir.p.y ) );
+    optixSetPayload_9( __float_as_uint( ir.p.z ) );
+
+    // Only write AOVs on first bounce
+    if( bounce == 0 )
+    {
         // write AOVs for motion vectors, post effects, etc
-        {
-            const float depth = dot( normalize( params.W ), ir.p - params.eye );
-            gbuffer::write( depth, params.aovDepth, idx );
+        const float depth = dot( normalize( params.W ), ir.p - params.eye );
+        gbuffer::write( depth, params.aovDepth, idx );
 
-            gbuffer::write( make_float4( ir.n, 1.f ), params.aovNormals, idx );
-            gbuffer::write( make_float4( baseColor, 1.f ), params.aovAlbedo, idx );
+        gbuffer::write( make_float4( ir.n, 1.f ), params.aovNormals, idx );
+        gbuffer::write( make_float4( baseColor, 1.f ), params.aovAlbedo, idx );
+        gbuffer::write( make_float4( specularColor, 1.f ), params.aovSpecular, idx );
+        gbuffer::write( roughness, params.aovRoughness, idx );
 
-            HitResult hit = {
-                .instanceId   = optixGetInstanceId(),
-                .surfaceIndex = ir.surfaceIndex,
-                .u            = ir.surfaceUV.x,
-                .v            = ir.surfaceUV.y,
-                .texcoord     = ir.texcoord,
-            };
-            const uint2  dims            = make_uint2( optixGetLaunchDimensions() );
-            unsigned int linearIdx       = dims.x * idx.y + idx.x;
-            params.hit_buffer[linearIdx] = hit;
-        }
+        // Note: We don't write the specular hit distance on the first bounce yet, because doing so
+        // did not improve the denoiser output.
+        gbuffer::write( std::numeric_limits<float>::infinity(), params.aovSpecularHitT, idx );
+
+        HitResult hit {};
+        hit.instanceId = optixGetInstanceId();
+        hit.surfaceIndex = ir.surfaceIndex;
+        hit.u = ir.surfaceUV.x;
+        hit.v = ir.surfaceUV.y;
+        hit.texcoord = ir.texcoord;
+        
+        const uint2 dims = make_uint2( optixGetLaunchDimensions() );
+        unsigned int linearIdx = dims.x * idx.y + idx.x;
+        params.hit_buffer[linearIdx] = hit;
     }
 }
 

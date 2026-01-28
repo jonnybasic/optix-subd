@@ -82,6 +82,9 @@ struct GBuffer
         DEPTH,
         DEPTH_HIRES,
         DENOISED,
+        SPECULAR,
+        ROUGHNESS,
+        SPECULAR_HIT_T,
         COUNT
     };
 
@@ -92,10 +95,14 @@ struct GBuffer
     RwFloat  m_depth;
     RwFloatInterop m_depthHires;
     RwFloat4 m_denoised;
+    RwFloat4 m_specular;
+    RwFloat  m_roughness;
+    RwFloat  m_specularHitT;
 
     // convenience for compile-time iteration over channels
     auto channels() {
-        return std::tie( m_albedo, m_normals, m_motionvecs, m_color, m_depth, m_depthHires, m_denoised );
+        return std::tie( m_albedo, m_normals, m_motionvecs, m_color, m_depth, m_depthHires, m_denoised, m_specular,
+                        m_roughness, m_specularHitT );
     }
 
     const uint2 m_rendersize = { 0, 0 };
