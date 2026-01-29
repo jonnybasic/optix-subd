@@ -41,7 +41,7 @@ if (ENABLE_ASSET_DOWNLOAD)
     FetchContent_Declare(
         assets
         GIT_REPOSITORY https://github.com/NVIDIA-RTX/RTXMG-Sample-Assets.git
-        GIT_TAG 41be4be6250c2a1ec9753d3a7f0f559081cf28fe 
+        GIT_TAG main
         GIT_SHALLOW true
         GIT_PROGRESS true
         SOURCE_DIR "${CMAKE_SOURCE_DIR}/assets"
