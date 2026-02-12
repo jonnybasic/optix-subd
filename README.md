@@ -132,10 +132,7 @@ Vulkan
     update the TLAS of large dynamic scenes with `VK_NV_partitioned_acceleration_structure`
 
 Tools
-  * [nv_cluster_builder](https://github.com/nvpro-samples/nv_cluster_builder) 
-    spatial clustering algorithms for triangle meshes (C++ library)
-  * [nv_cluster_lod_builder](https://github.com/nvpro-samples/nv_cluster_lod_builder)
-    continuous level of detail (LOD) for triangle meshes (C++ library)
+  * [meshoptimizer.org](https://meshoptimizer.org/) - meshoptimizer provides ray tracing friendly clusterization through `meshopt_buildMeshletsSpatial`. If you are interested in building a continuous level of detail system, have a look at its [clusterlod.h](https://github.com/zeux/meshoptimizer/blob/master/demo/clusterlod.h) demo, it shows the necessary steps
 
 ## Known Issues
 
