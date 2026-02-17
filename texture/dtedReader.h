@@ -34,7 +34,7 @@
 #include <filesystem>
 #include <vector>
 
-class Texture;
+struct Texture;
 
 namespace dted {
 

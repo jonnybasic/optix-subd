@@ -204,7 +204,7 @@ std::unique_ptr<Shape> generateEllipsoidMesh(const EllipsoidConfig& config)
     // Compute AABB
     shape->aabb.invalidate();
     for (const auto& v : shape->verts) {
-        shape->aabb.include({v.x, v.y, v.z});
+        shape->aabb.include({v.point.x, v.point.y, v.point.z});
     }
     
     // Create a default material

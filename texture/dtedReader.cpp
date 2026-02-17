@@ -30,11 +30,15 @@
 
 #include "dtedReader.h"
 #include "texture.h"
+#include "dxgi_formats.h"
 
 #include <fstream>
 #include <cstring>
 #include <algorithm>
 #include <iostream>
+
+// Forward declaration from texture.cu
+cudaPitchedPtr makeCudaPitchedPtr(const FormatMapping& mapping, void* ptr, uint32_t width, uint32_t height);
 
 namespace dted {
 
@@ -250,15 +254,29 @@ bool DTEDReader::toTexture(Texture& tex) {
         return false;
     }
     
-    // Populate texture structure
-    tex.width = m_header.numLonPoints;
-    tex.height = m_header.numLatPoints;
-    tex.components = 1;  // Single channel (elevation)
-    tex.depth = sizeof(float);
+    // Populate texture structure with correct member names
+    tex.m_width = m_header.numLonPoints;
+    tex.m_height = m_header.numLatPoints;
+    tex.m_depth = 1;  // 2D texture
     
-    tex.texels.resize(tex.width * tex.height * tex.components * tex.depth);
-    float* floatData = reinterpret_cast<float*>(tex.texels.data());
+    // Set pixel format to single channel float
+    tex.m_pixelFormat = DXGI_FORMAT_R32_FLOAT;
     
+    // Get format mapping for R32_FLOAT
+    FormatMapping const* mapping = getPixelFormatMapping(tex.m_pixelFormat);
+    if (mapping) {
+        tex.m_pixelFormatMapping = *mapping;
+    } else {
+        std::cerr << "Failed to get pixel format mapping for R32_FLOAT\n";
+        return false;
+    }
+    
+    // Allocate data buffer
+    const size_t dataSize = tex.m_width * tex.m_height * sizeof(float);
+    tex.m_data = std::make_unique<uint8_t[]>(dataSize);
+    float* floatData = reinterpret_cast<float*>(tex.m_data.get());
+    
+    // Convert elevation values to normalized float
     for (size_t i = 0; i < m_elevations.size(); ++i) {
         if (m_elevations[i] == MISSING_DATA) {
             floatData[i] = 0.0f;  // Map missing data to sea level
@@ -267,6 +285,10 @@ bool DTEDReader::toTexture(Texture& tex) {
             floatData[i] = static_cast<float>(m_elevations[i] - m_header.minElevation) / elevRange;
         }
     }
+    
+    // Create mipmap entry (single level, no mipmapping)
+    tex.m_mipmaps.resize(1);
+    tex.m_mipmaps[0] = makeCudaPitchedPtr(*mapping, floatData, tex.m_width, tex.m_height);
     
     return true;
 }
