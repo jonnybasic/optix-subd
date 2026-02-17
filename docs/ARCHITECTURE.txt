@@ -1,0 +1,177 @@
+WGS84 Ellipsoid Terrain Viewer - System Architecture
+=====================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Command Line Interface                           │
+│  ./optixSubd --ellipsoid --dted-dir /path --elevation-scale 2.0         │
+└──────────────────────────────────┬──────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          OptixSubdApp                                    │
+│  ┌────────────────────────────────────────────────────────────────┐    │
+│  │  Constructor:                                                   │    │
+│  │    if (ellipsoidMode) {                                        │    │
+│  │       loadEllipsoidScene()                                     │    │
+│  │    } else {                                                    │    │
+│  │       loadScene()  // existing OBJ/JSON path                  │    │
+│  │    }                                                           │    │
+│  └────────────────────────────────────────────────────────────────┘    │
+└──────────────────┬──────────────────────────────┬─────────────────────┘
+                   │                               │
+                   ▼                               ▼
+    ┌──────────────────────────┐    ┌───────────────────────────┐
+    │   Ellipsoid Generator    │    │   DTED Tile Manager       │
+    │  (scene/ellipsoid.cpp)   │    │ (texture/dtedTileManager) │
+    └────────┬─────────────────┘    └───────────┬───────────────┘
+             │                                   │
+             │ generateEllipsoidMesh()          │ loadTile()
+             │                                   │
+             ▼                                   ▼
+    ┌──────────────────────┐         ┌──────────────────────┐
+    │   Shape Object       │         │   DTED Reader        │
+    │  - vertices (XYZ)    │         │ (texture/dtedReader) │
+    │  - UVs (lat/lon)     │         └──────────┬───────────┘
+    │  - quad topology     │                    │
+    │  - materials         │                    │ load()
+    └────────┬─────────────┘                    │ parseUHL/DSI/ACC
+             │                                   │ parseDataRecords()
+             │ writeShape() / readShape()       │
+             │                                   ▼
+             ▼                         ┌─────────────────────┐
+    ┌──────────────────────┐          │  Elevation Data      │
+    │  Temporary OBJ File  │          │  (int16 array)       │
+    │  /tmp/ellipsoid.obj  │          └──────────┬──────────┘
+    └────────┬─────────────┘                     │
+             │                                   │ toTexture()
+             │                                   │
+             ▼                                   ▼
+    ┌────────────────────────────────────────────────────────┐
+    │              Scene::create()                            │
+    │  ┌──────────────────────────────────────────────────┐  │
+    │  │  ModelLoader::loadObjFile()                      │  │
+    │  │    → SubdivisionSurface                          │  │
+    │  │    → MaterialCache                               │  │
+    │  │    → TopologyCache                               │  │
+    │  └──────────────────────────────────────────────────┘  │
+    └──────────────────────┬─────────────────────────────────┘
+                           │
+                           ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │                     GPU Pipeline                              │
+    │  ┌────────────────┐  ┌──────────────┐  ┌─────────────────┐  │
+    │  │ Tessellation   │→ │ BVH Builder  │→ │  Ray Tracing   │  │
+    │  │ (Catmull-Clark)│  │ (OptiX)      │  │  (OptiX)       │  │
+    │  └────────────────┘  └──────────────┘  └─────────────────┘  │
+    │                           ↓                      ↓            │
+    │                    ┌──────────────┐     ┌──────────────┐    │
+    │                    │  Clusters    │     │  Materials   │    │
+    │                    │  (GPU)       │     │  (GPU)       │    │
+    │                    └──────────────┘     └──────────────┘    │
+    └──────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+    ┌──────────────────────────────────────────────────────────────┐
+    │                    Frame Output                               │
+    │  - OpenGL Display                                             │
+    │  - PNG/Image File                                             │
+    │  - DLSS Denoising                                             │
+    └──────────────────────────────────────────────────────────────┘
+
+
+UDIM Tile Mapping
+=================
+
+Geographic Tiles               UDIM Coordinates
+┌──────────────┐              ┌──────────────────┐
+│ Lat/Lon Grid │    Map to    │  UDIM IDs        │
+│              │  ────────▶   │                  │
+│  -90° to 90° │              │  1001 to 66401   │
+│ -180° to 180°│              │  (360 × 180)     │
+└──────────────┘              └──────────────────┘
+
+Formula: UDIM = 1001 + (lon + 180) + (lat + 90) × 360
+
+Examples:
+  0°N,   0°E  → UDIM 33481
+ 37°N, 122°W  → UDIM 42859
+ 51°N,   0°E  → UDIM 51481
+
+
+DTED File Structure
+===================
+
+┌───────────────────────────────────────┐
+│ User Header Label (UHL)      80 bytes │  ← Origin, intervals, dimensions
+├───────────────────────────────────────┤
+│ Data Set ID (DSI)           648 bytes │  ← Metadata
+├───────────────────────────────────────┤
+│ Accuracy (ACC)             2700 bytes │  ← Quality info
+├───────────────────────────────────────┤
+│ Data Records (Column-Major)           │
+│  ┌─────────────────────────────────┐  │
+│  │ Column 0 (Longitude 0)          │  │
+│  │  ├─ Header (8 bytes)            │  │
+│  │  ├─ Elevation 0 (int16 BE)      │  │
+│  │  ├─ Elevation 1 (int16 BE)      │  │
+│  │  │     ...                       │  │
+│  │  ├─ Elevation N (int16 BE)      │  │
+│  │  └─ Checksum (4 bytes)          │  │
+│  ├─────────────────────────────────┤  │
+│  │ Column 1 (Longitude 1)          │  │
+│  │  ...                             │  │
+│  └─────────────────────────────────┘  │
+└───────────────────────────────────────┘
+
+Level 0:  121 × 121 posts  (30" spacing)  ~34 KB
+Level 1: 1201 × 1201 posts  (3" spacing)  ~2.9 MB
+Level 2: 3601 × 3601 posts  (1" spacing)  ~26 MB
+
+
+Data Flow
+=========
+
+DTED File → DTEDReader → Texture → [Future: TextureCuda] → Displacement
+                                         ↓
+                                    GPU Upload
+                                         ↓
+                                   Material Bind
+                                         ↓
+                                   Tessellation
+                                         ↓
+                                   Render Frame
+
+
+Key Components
+==============
+
+1. Ellipsoid Generation
+   - WGS84 parameters (a=6378137m, b=6356752m)
+   - Parametric mesh (lat/lon to XYZ)
+   - Quad topology for subdivision
+   - Ellipsoidal normals
+
+2. DTED Parser
+   - MIL-PRF-89020B compliant
+   - Big-endian int16 handling
+   - Column-major to row-major conversion
+   - Missing data handling (-32767)
+
+3. Tile Manager
+   - LRU cache (configurable size)
+   - UDIM coordinate mapping
+   - File discovery (standard naming)
+   - Visibility culling (placeholder)
+
+4. Material System
+   - Displacement parameters
+   - UDIM texture indexing
+   - Scale/bias controls
+   - [Future: Dynamic texture binding]
+
+5. Build System
+   - CMake integration
+   - OptiX Toolkit dependencies
+   - C++20 features
+   - Platform-independent paths
+
