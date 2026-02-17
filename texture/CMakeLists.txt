@@ -32,6 +32,10 @@ set(TEXTURE_SRC
     bicubicTexture.h
     dds.cpp
     dds.h
+    dtedReader.cpp
+    dtedReader.h
+    dtedTileManager.cpp
+    dtedTileManager.h
     exr.cpp
     exr.h
     dxgi_formats.cpp
@@ -51,7 +55,7 @@ set(TEXTURE_SRC
 
 add_library(texture OBJECT ${TEXTURE_SRC})
 target_include_directories(texture PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
-target_link_libraries(texture OptiXToolkit::ShaderUtil OptiXToolkit::Util)
+target_link_libraries(texture OptiXToolkit::ShaderUtil OptiXToolkit::Util OptiXToolkit::Gui)
 
 
 #target_compile_options( texture PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-G>" )

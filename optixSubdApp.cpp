@@ -35,7 +35,7 @@
 #include "statistics.h"
 
 #include <scene/shapeUtils.h>
-
+#include <scene/ellipsoid.h>
 
 #include <depth/DepthPass.h>
 #include <material/materialCache.h>
@@ -43,6 +43,7 @@
 #include <motionvec/motionvec.h>
 #include <wireframe/wireframe.h>
 #include <texture/textureCache.h>
+#include <texture/dtedTileManager.h>
 #include <scene/scene.h>
 
 #include <chrono>
@@ -135,7 +136,12 @@ OptixSubdApp::OptixSubdApp( int argc, char const* const* argv )
 
     OTK_REQUIRE_MSG( clustersSupported && m_maxClusterEdgeSegments > 0, "device does not support clusters" );
 
-    loadScene( scenePath.lexically_normal().generic_string(), getMediaPath().generic_string(), {0, 0});
+    // Load scene based on mode
+    if (m_args.ellipsoidMode) {
+        loadEllipsoidScene(m_args.dtedDirectory, {0, 0});
+    } else {
+        loadScene( scenePath.lexically_normal().generic_string(), getMediaPath().generic_string(), {0, 0});
+    }
 
     // re-apply the CLI settings to override any value potentially set by the scene
     m_args.parse( argc, argv );
@@ -182,6 +188,55 @@ void OptixSubdApp::loadScene(
             m_wireframePass = std::make_unique<WireframePass>( *m_scene );
 
     }
+    m_accelBuilderNeedsUpdate = true;
+    resetCamera();
+}
+
+void OptixSubdApp::loadEllipsoidScene( const std::string& dtedDirectory, int2 frameRange )
+{
+    auto& renderer = getOptixRenderer();
+    
+    m_args.sceneArgs() = {};
+    
+    // Create DTED tile manager if directory is provided
+    if (!dtedDirectory.empty()) {
+        m_dtedTileManager = std::make_unique<dted::DTEDTileManager>(dtedDirectory);
+        m_dtedTileManager->setMaxLoadedTiles(m_args.maxDTEDTiles);
+    }
+    
+    // Generate ellipsoid mesh
+    ellipsoid::EllipsoidConfig config;
+    config.longitudeSegments = 128;
+    config.latitudeSegments = 64;
+    config.generateQuads = true;
+    
+    auto ellipsoidShape = ellipsoid::generateEllipsoidMesh(config);
+    
+    // Create a temporary OBJ file to use with the existing Scene::create infrastructure
+    // This is a minimal change approach - a more elegant solution would extend Scene directly
+    std::string tempObjPath = "/tmp/ellipsoid_temp.obj";
+    ellipsoidShape->writeShape(tempObjPath);
+    
+    // Load as a regular scene
+    m_scene.reset();
+    if( m_scene = Scene::create( tempObjPath, "", frameRange, m_args ) )
+    {
+        renderer.setMaterials( m_scene->getMaterialCache().getDeviceData() );
+        renderer.resetDenoiser();
+        renderer.resetSubframes();
+
+        m_depthPass = std::make_unique<DepthPass>(renderer.getContext(), renderer.getCommonPipelineOptions());
+
+        m_motionVecPass = std::make_unique<MotionVecPass>();
+
+        if( m_wireframePass )
+            m_wireframePass = std::make_unique<WireframePass>( *m_scene );
+    }
+    
+    // Apply elevation scale/bias from arguments
+    m_args.dispScale = m_args.elevationScale;
+    m_args.dispBias = m_args.elevationBias;
+    
     m_accelBuilderNeedsUpdate = true;
     resetCamera();
 }
