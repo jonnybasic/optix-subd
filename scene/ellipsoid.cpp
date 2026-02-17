@@ -153,13 +153,14 @@ std::unique_ptr<Shape> generateEllipsoidMesh(const EllipsoidConfig& config)
             const int next = (iLon + 1) % numLon;
             
             shape->nvertsPerFace.push_back(3);  // Triangle for pole
+            // Reversed winding for outward-facing normals
             shape->faceverts.push_back(0);       // North pole
-            shape->faceverts.push_back(1 + iLon);
             shape->faceverts.push_back(1 + next);
+            shape->faceverts.push_back(1 + iLon);
             
             shape->faceuvs.push_back(0);
-            shape->faceuvs.push_back(1 + iLon);
             shape->faceuvs.push_back(1 + next);
+            shape->faceuvs.push_back(1 + iLon);
         }
         
         // Middle latitude quads
@@ -171,15 +172,16 @@ std::unique_ptr<Shape> generateEllipsoidMesh(const EllipsoidConfig& config)
                 const int next = (iLon + 1) % numLon;
                 
                 shape->nvertsPerFace.push_back(4);  // Quad
+                // Reversed winding order for outward-facing normals
                 shape->faceverts.push_back(baseIdx + iLon);
-                shape->faceverts.push_back(baseIdx + next);
-                shape->faceverts.push_back(nextBaseIdx + next);
                 shape->faceverts.push_back(nextBaseIdx + iLon);
+                shape->faceverts.push_back(nextBaseIdx + next);
+                shape->faceverts.push_back(baseIdx + next);
                 
                 shape->faceuvs.push_back(baseIdx + iLon);
-                shape->faceuvs.push_back(baseIdx + next);
-                shape->faceuvs.push_back(nextBaseIdx + next);
                 shape->faceuvs.push_back(nextBaseIdx + iLon);
+                shape->faceuvs.push_back(nextBaseIdx + next);
+                shape->faceuvs.push_back(baseIdx + next);
             }
         }
         
@@ -191,13 +193,14 @@ std::unique_ptr<Shape> generateEllipsoidMesh(const EllipsoidConfig& config)
             const int next = (iLon + 1) % numLon;
             
             shape->nvertsPerFace.push_back(3);  // Triangle for pole
+            // Reversed winding for outward-facing normals
             shape->faceverts.push_back(lastRingBase + iLon);
-            shape->faceverts.push_back(southPoleIdx);
             shape->faceverts.push_back(lastRingBase + next);
+            shape->faceverts.push_back(southPoleIdx);
             
             shape->faceuvs.push_back(lastRingBase + iLon);
-            shape->faceuvs.push_back(southPoleIdx);
             shape->faceuvs.push_back(lastRingBase + next);
+            shape->faceuvs.push_back(southPoleIdx);
         }
     }
     
