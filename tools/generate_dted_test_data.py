@@ -11,29 +11,46 @@ from pathlib import Path
 
 
 def create_dted_header(lat, lon, num_lat_points, num_lon_points, lat_interval, lon_interval):
-    """Create DTED User Header Label (UHL) record - 80 bytes."""
+    """Create DTED User Header Label (UHL) record - 80 bytes.
+    
+    Format: DDDMMSSH where DDD=degrees (000-180/360), MM=minutes (00-59), 
+    SS=seconds (00-59), H=hemisphere (N/S/E/W)
+    """
     uhl = bytearray(80)
     uhl[0:4] = b'UHL1'
     
-    # Origin longitude/latitude
+    # Origin longitude (DDDMMSSH format) - always 00 minutes and seconds for degree tiles
     lon_hem = 'E' if lon >= 0 else 'W'
-    lat_hem = 'N' if lat >= 0 else 'S'
-    uhl[4:12] = f"{abs(lon):03d}0000{lon_hem}".encode('ascii')
-    uhl[12:20] = f"{abs(lat):03d}0000{lat_hem}".encode('ascii')
+    lon_abs = abs(lon)
+    lon_str = f"{lon_abs:03d}0000{lon_hem}"
+    uhl[4:12] = lon_str.encode('ascii')
     
-    # Intervals
-    uhl[20:24] = f"{lon_interval * 10:04d}".encode('ascii')
-    uhl[24:28] = f"{lat_interval * 10:04d}".encode('ascii')
+    # Origin latitude (DDDMMSSH format)
+    lat_hem = 'N' if lat >= 0 else 'S'
+    lat_abs = abs(lat)
+    lat_str = f"{lat_abs:03d}0000{lat_hem}"
+    uhl[12:20] = lat_str.encode('ascii')
+    
+    # Data intervals (in tenths of arc-seconds)
+    lon_int_str = f"{lon_interval * 10:04d}"
+    lat_int_str = f"{lat_interval * 10:04d}"
+    uhl[20:24] = lon_int_str.encode('ascii')
+    uhl[24:28] = lat_int_str.encode('ascii')
+    
+    # Accuracy code
     uhl[28:32] = b'0000'
     
-    # Counts
-    uhl[47:51] = f"{num_lat_points:04d}".encode('ascii')
-    uhl[51:55] = f"{num_lon_points:04d}".encode('ascii')
+    # Number of lon/lat lines
+    num_lat_str = f"{num_lat_points:04d}"
+    num_lon_str = f"{num_lon_points:04d}"
+    uhl[47:51] = num_lat_str.encode('ascii')
+    uhl[51:55] = num_lon_str.encode('ascii')
     
-    # Fill with spaces
+    # Fill remaining with spaces
     for i in range(55, 80):
         if uhl[i] == 0:
             uhl[i] = ord(' ')
+    
     return bytes(uhl)
 
 

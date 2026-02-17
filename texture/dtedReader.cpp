@@ -69,6 +69,15 @@ bool DTEDReader::parseUHL(const uint8_t* data) {
     std::memcpy(lonStr, data + 4, 8);
     std::memcpy(latStr, data + 12, 8);
     
+    // Validate that position 0-2 and 3-6 are digits
+    for (int i = 0; i < 7; ++i) {
+        if (!std::isdigit(static_cast<unsigned char>(lonStr[i])) || 
+            !std::isdigit(static_cast<unsigned char>(latStr[i]))) {
+            std::cerr << "Invalid coordinate format in UHL record\n";
+            return false;
+        }
+    }
+    
     // Simple parsing - extract degrees and hemisphere
     int lonDeg = (lonStr[0] - '0') * 100 + (lonStr[1] - '0') * 10 + (lonStr[2] - '0');
     int latDeg = (latStr[0] - '0') * 100 + (latStr[1] - '0') * 10 + (latStr[2] - '0');
@@ -80,6 +89,7 @@ bool DTEDReader::parseUHL(const uint8_t* data) {
     m_header.latOrigin = (latHem == 'S' || latHem == 's') ? -latDeg : latDeg;
     
     // Parse intervals (bytes 20-23: lon, 24-27: lat) in arc-seconds * 10
+    // Note: intervals are expected to be multiples of 10 arc-seconds for exact conversion
     char intervalStr[5] = {0};
     std::memcpy(intervalStr, data + 20, 4);
     m_header.lonInterval = std::atoi(intervalStr) / 10;

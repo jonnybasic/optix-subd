@@ -120,6 +120,7 @@ void DTEDTileManager::loadTile(int lat, int lon) {
     auto it = m_tiles.find(udim);
     if (it != m_tiles.end() && it->second.loaded) {
         // Move to front of LRU queue
+        // Remove from current position (O(n) - acceptable for small cache sizes)
         m_lruQueue.erase(std::remove(m_lruQueue.begin(), m_lruQueue.end(), udim), m_lruQueue.end());
         m_lruQueue.push_front(udim);
         return;
@@ -198,9 +199,12 @@ bool DTEDTileManager::isVisible(const DTEDTile& tile, const otk::Camera& camera)
     // Simple frustum culling based on camera position
     // For a globe viewer, we'd check if the tile is on the visible hemisphere
     
-    // For now, use a simple distance-based check
-    // This is a placeholder - proper implementation would use frustum planes
+    // TODO: Implement proper frustum culling:
+    // 1. Project camera frustum planes onto ellipsoid surface
+    // 2. Test tile bounding box against frustum planes
+    // 3. Check if tile is on visible hemisphere (dot product with view direction)
     
+    // For now, use a simple distance-based check as placeholder
     return true;  // Always visible for initial implementation
 }
 

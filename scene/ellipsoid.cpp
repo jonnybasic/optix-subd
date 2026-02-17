@@ -38,7 +38,7 @@
 namespace ellipsoid {
 
 namespace {
-    constexpr double PI = 3.14159265358979323846;
+    constexpr double PI = 3.14159265358979323846264338327950288;
     
     // Convert degrees to radians
     inline double degToRad(double degrees) {

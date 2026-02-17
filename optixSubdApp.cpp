@@ -214,12 +214,13 @@ void OptixSubdApp::loadEllipsoidScene( const std::string& dtedDirectory, int2 fr
     
     // Create a temporary OBJ file to use with the existing Scene::create infrastructure
     // This is a minimal change approach - a more elegant solution would extend Scene directly
-    std::string tempObjPath = "/tmp/ellipsoid_temp.obj";
-    ellipsoidShape->writeShape(tempObjPath);
+    namespace fs = std::filesystem;
+    fs::path tempObjPath = fs::temp_directory_path() / "ellipsoid_temp.obj";
+    ellipsoidShape->writeShape(tempObjPath.string());
     
     // Load as a regular scene
     m_scene.reset();
-    if( m_scene = Scene::create( tempObjPath, "", frameRange, m_args ) )
+    if( m_scene = Scene::create( tempObjPath.string(), "", frameRange, m_args ) )
     {
         renderer.setMaterials( m_scene->getMaterialCache().getDeviceData() );
         renderer.resetDenoiser();
@@ -233,9 +234,14 @@ void OptixSubdApp::loadEllipsoidScene( const std::string& dtedDirectory, int2 fr
             m_wireframePass = std::make_unique<WireframePass>( *m_scene );
     }
     
-    // Apply elevation scale/bias from arguments
-    m_args.dispScale = m_args.elevationScale;
-    m_args.dispBias = m_args.elevationBias;
+    // Apply elevation-specific displacement parameters to general displacement settings
+    // Note: This assumes dispScale/dispBias have the same semantic meaning for ellipsoid mode
+    if (m_args.elevationScale != 1.0f) {
+        m_args.dispScale = m_args.elevationScale;
+    }
+    if (m_args.elevationBias != 0.0f) {
+        m_args.dispBias = m_args.elevationBias;
+    }
     
     m_accelBuilderNeedsUpdate = true;
     resetCamera();
