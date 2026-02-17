@@ -33,7 +33,7 @@
 #include <memory>
 #include <string>
 
-class Shape;
+struct Shape;
 
 namespace ellipsoid {
 
