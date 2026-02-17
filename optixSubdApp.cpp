@@ -216,7 +216,7 @@ void OptixSubdApp::loadEllipsoidScene( const std::string& dtedDirectory, int2 fr
     // This is a minimal change approach - a more elegant solution would extend Scene directly
     namespace fs = std::filesystem;
     fs::path tempObjPath = fs::temp_directory_path() / "ellipsoid_temp.obj";
-    ellipsoidShape->writeShape(tempObjPath.string());
+    ellipsoidShape->saveObjFile(tempObjPath.string());
     
     // Load as a regular scene
     m_scene.reset();

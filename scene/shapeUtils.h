@@ -139,6 +139,9 @@ struct Shape
     void writeShape( const std::string& objFile ) const;
     bool readShape( const std::string& objFile );
 
+    // export to OBJ file format
+    void saveObjFile( const std::string& objFile ) const;
+
     int  getNumVertices() const { return (int)verts.size(); }
     int  getNumFaces() const { return (int)nvertsPerFace.size(); }
     int  getFVarWidth() const { return hasUV() ? 2 : 0; }
