@@ -61,7 +61,9 @@ static void printUsageAndExit( const char* argv0, const std::string& token = {} 
         "  --dted-dir <path>                                 Path to DTED file directory\n"
         "  --elevation-scale <f>                             Elevation scale factor (default: 1.0)\n"
         "  --elevation-bias <f>                              Elevation bias offset (default: 0.0)\n"
-        "  --max-tiles <n>                                   Maximum loaded DTED tiles (default: 64)\n";
+        "  --max-tiles <n>                                   Maximum loaded DTED tiles (default: 64)\n"
+        "  --longitude-segments <n>                          Ellipsoid longitude segments (default: 128)\n"
+        "  --latitude-segments <n>                           Ellipsoid latitude segments (default: 64)\n";
 
     // clang-format on
 
@@ -137,6 +139,14 @@ void Args::parse( int argc, char const* const* argv )
         else if( arg == "--max-tiles" )
         {
             parseArgValues( 1, [&]() { maxDTEDTiles = atoi( argv[++i] ); } );
+        }
+        else if( arg == "--longitude-segments" )
+        {
+            parseArgValues( 1, [&]() { longitudeSegments = atoi( argv[++i] ); } );
+        }
+        else if( arg == "--latitude-segments" )
+        {
+            parseArgValues( 1, [&]() { latitudeSegments = atoi( argv[++i] ); } );
         }
         else
             printUsageAndExit( argv[0], std::string( "Unknown option: " ) + argv[i] );

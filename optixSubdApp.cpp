@@ -273,8 +273,8 @@ void OptixSubdApp::loadEllipsoidScene( const std::string& dtedDirectory, int2 fr
     
     // Generate ellipsoid mesh
     ellipsoid::EllipsoidConfig config;
-    config.longitudeSegments = 128;
-    config.latitudeSegments = 64;
+    config.longitudeSegments = m_args.longitudeSegments;
+    config.latitudeSegments = m_args.latitudeSegments;
     config.generateQuads = true;
     
     auto ellipsoidShape = ellipsoid::generateEllipsoidMesh(config);

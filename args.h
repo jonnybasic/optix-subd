@@ -74,6 +74,8 @@ struct Args : private SceneArgs
     float       elevationScale = 1.0f;
     float       elevationBias = 0.0f;
     int         maxDTEDTiles = 64;
+    int         longitudeSegments = 128;
+    int         latitudeSegments = 64;
 
     unsigned char quantNBits = 0;
 
