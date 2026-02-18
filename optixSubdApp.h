@@ -55,6 +55,8 @@ class OptixRenderer;
 class TextureCache;
 class MaterialCache;
 
+namespace dted { class DTEDTileManager; }
+
 struct DepthPass;
 struct MotionVecPass;
 struct WireframePass;
@@ -79,6 +81,7 @@ class OptixSubdApp
     bool interactiveMode() const;
 
     void loadScene( std::string const& filepath, std::string const& mediapathm, int2 frameRange = {0, 0} );
+    void loadEllipsoidScene( const std::string& dtedDirectory, int2 frameRange = {0, 0} );
     void setupGL();
 
     std::string const& getCurrentShape() const { return m_args.meshInputFile; }
@@ -178,6 +181,7 @@ class OptixSubdApp
     std::unique_ptr<ClusterAccelBuilder>     m_accelBuilder;
 
     std::unique_ptr<Scene> m_scene;
+    std::unique_ptr<dted::DTEDTileManager> m_dtedTileManager;
 
     bool           m_cameraCanAnimate = true;
     otk::Camera    m_camera;

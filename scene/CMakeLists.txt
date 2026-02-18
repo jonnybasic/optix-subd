@@ -33,6 +33,8 @@ include(FetchNlohmannJson.cmake)
 set(SCENE_SRC
     animation.cpp    
     animation.h
+    ellipsoid.cpp
+    ellipsoid.h
     json.h
     shapeUtils.cpp
     shapeUtils.h

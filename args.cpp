@@ -56,7 +56,14 @@ static void printUsageAndExit( const char* argv0, const std::string& token = {} 
         "  -p '[eye][at][up]fov'   | --cameraPose            Camera pose\n"
         "  -res <w> <h>            | --resolution            Set image dimensions to <w>x<h>\n"
         "  -o <filename>           | --output                Optional image output file\n"
-        "                            --frames <n>            Optional number of frames to use for image output\n";
+        "                            --frames <n>            Optional number of frames to use for image output\n"
+        "  --ellipsoid                                       Enable ellipsoid terrain viewer mode\n"
+        "  --dted-dir <path>                                 Path to DTED file directory\n"
+        "  --elevation-scale <f>                             Elevation scale factor (default: 1.0)\n"
+        "  --elevation-bias <f>                              Elevation bias offset (default: 0.0)\n"
+        "  --max-tiles <n>                                   Maximum loaded DTED tiles (default: 64)\n"
+        "  --longitude-segments <n>                          Ellipsoid longitude segments (default: 128)\n"
+        "  --latitude-segments <n>                           Ellipsoid latitude segments (default: 64)\n";
 
     // clang-format on
 
@@ -112,6 +119,34 @@ void Args::parse( int argc, char const* const* argv )
         else if( arg == "-ll" || arg == "--loglevel" )
         {
             parseArgValues( 1, [&]() { logLevel = atoi( argv[++i] ); } );
+        }
+        else if( arg == "--ellipsoid" )
+        {
+            ellipsoidMode = true;
+        }
+        else if( arg == "--dted-dir" )
+        {
+            parseArgValues( 1, [&]() { dtedDirectory = argv[++i]; } );
+        }
+        else if( arg == "--elevation-scale" )
+        {
+            parseArgValues( 1, [&]() { elevationScale = static_cast<float>(atof( argv[++i] )); } );
+        }
+        else if( arg == "--elevation-bias" )
+        {
+            parseArgValues( 1, [&]() { elevationBias = static_cast<float>(atof( argv[++i] )); } );
+        }
+        else if( arg == "--max-tiles" )
+        {
+            parseArgValues( 1, [&]() { maxDTEDTiles = atoi( argv[++i] ); } );
+        }
+        else if( arg == "--longitude-segments" )
+        {
+            parseArgValues( 1, [&]() { longitudeSegments = atoi( argv[++i] ); } );
+        }
+        else if( arg == "--latitude-segments" )
+        {
+            parseArgValues( 1, [&]() { latitudeSegments = atoi( argv[++i] ); } );
         }
         else
             printUsageAndExit( argv[0], std::string( "Unknown option: " ) + argv[i] );

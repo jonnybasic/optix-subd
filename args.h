@@ -68,6 +68,15 @@ struct Args : private SceneArgs
     std::string meshInputFile;
     std::string camString;
 
+    // Ellipsoid terrain viewer options
+    bool        ellipsoidMode = false;
+    std::string dtedDirectory;
+    float       elevationScale = 1.0f;
+    float       elevationBias = 0.0f;
+    int         maxDTEDTiles = 64;
+    int         longitudeSegments = 128;
+    int         latitudeSegments = 64;
+
     unsigned char quantNBits = 0;
 
     bool enableFrustumVisibility = true;
